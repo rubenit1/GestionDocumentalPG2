@@ -1,61 +1,76 @@
-from docx.document import Document
-from docx.table import _Cell, Table
-from docx.text.paragraph import Paragraph
+from docx.table import _Cell
 
 def reemplazar_placeholders_docx(doc_obj, reemplazos: dict):
     """
-    Reemplaza todos los placeholders en un documento Word (.docx).
-    Maneja texto en párrafos, tablas, encabezados y pies de página.
-    Preserva el formato del primer 'run' del párrafo.
+    Reemplaza todos los placeholders en un documento Word.
+    Esta lógica está basada en la versión original y funcional del main.py.
+    Maneja correctamente runs fragmentados y preserva el formato.
     """
-    
-    def reemplazar_en_parrafo(parrafo: Paragraph):
-        """Función interna para reemplazar texto en un párrafo."""
+
+    def reemplazar_en_parrafo(parrafo):
         texto_completo = ''.join(run.text for run in parrafo.runs)
         
-        # Si no hay placeholders en todo el texto del párrafo, no hacer nada
+        # Si no hay nada que reemplazar, salimos para no alterar el formato
         if not any(key in texto_completo for key in reemplazos.keys()):
             return
 
-        # Guardar el formato del primer 'run'
-        estilo_run = None
-        if parrafo.runs:
-            estilo_run = parrafo.runs[0]
-
-        # Realizar todos los reemplazos en la cadena de texto completa
+        # Realizamos todos los reemplazos en la cadena de texto
         for key, value in reemplazos.items():
             texto_completo = texto_completo.replace(key, str(value or ''))
 
-        # Limpiar todos los 'runs' existentes en el párrafo
-        for run in parrafo.runs:
-            run.text = ''
-        
-        # Añadir un nuevo 'run' con el texto completo y el estilo original
-        if estilo_run:
+        # Preservamos el formato del primer 'run' del párrafo
+        if len(parrafo.runs) > 0:
+            primer_run = parrafo.runs[0]
+            fuente_nombre = primer_run.font.name
+            fuente_tamanio = primer_run.font.size
+            es_negrita = primer_run.bold
+            es_cursiva = primer_run.italic
+            es_subrayado = primer_run.underline
+
+            # Limpiamos todos los runs del párrafo
+            for run in parrafo.runs:
+                run.text = ''
+            
+            # Añadimos un nuevo run con el texto completo y aplicamos el formato guardado
             nuevo_run = parrafo.add_run(texto_completo)
-            nuevo_run.font.name = estilo_run.font.name
-            nuevo_run.font.size = estilo_run.font.size
-            nuevo_run.bold = estilo_run.bold
-            nuevo_run.italic = estilo_run.italic
-            nuevo_run.underline = estilo_run.underline
-            # Puedes añadir más propiedades de estilo si las necesitas
-        else:
-            parrafo.add_run(texto_completo)
+            if fuente_nombre:
+                nuevo_run.font.name = fuente_nombre
+            if fuente_tamanio:
+                nuevo_run.font.size = fuente_tamanio
+            if es_negrita is not None:
+                nuevo_run.bold = es_negrita
+            if es_cursiva is not None:
+                nuevo_run.italic = es_cursiva
+            if es_subrayado is not None:
+                nuevo_run.underline = es_subrayado
 
-    def iterar_bloques(doc_part):
-        """Itera sobre párrafos y tablas en una parte del documento."""
-        for bloque in doc_part.iter_content():
-            if isinstance(bloque, Paragraph):
-                reemplazar_en_parrafo(bloque)
-            elif isinstance(bloque, Table):
-                for row in bloque.rows:
-                    for cell in row.cells:
-                        iterar_bloques(cell)
+    def reemplazar_en_tabla(tabla):
+        for fila in tabla.rows:
+            for celda in fila.cells:
+                for parrafo in celda.paragraphs:
+                    reemplazar_en_parrafo(parrafo)
+                # Manejo de tablas anidadas
+                for tabla_anidada in celda.tables:
+                    reemplazar_en_tabla(tabla_anidada)
 
-    # Procesar el cuerpo principal del documento
-    iterar_bloques(doc_obj)
+    # --- INICIO DEL PROCESO ---
 
-    # Procesar encabezados y pies de página
+    # Reemplazar en párrafos del cuerpo
+    for parrafo in doc_obj.paragraphs:
+        reemplazar_en_parrafo(parrafo)
+
+    # Reemplazar en tablas del cuerpo
+    for tabla in doc_obj.tables:
+        reemplazar_en_tabla(tabla)
+
+    # Reemplazar en encabezados y pies de página
     for seccion in doc_obj.sections:
-        iterar_bloques(seccion.header)
-        iterar_bloques(seccion.footer)
+        for parrafo in seccion.header.paragraphs:
+            reemplazar_en_parrafo(parrafo)
+        for tabla in seccion.header.tables:
+            reemplazar_en_tabla(tabla)
+        for parrafo in seccion.footer.paragraphs:
+            reemplazar_en_parrafo(parrafo)
+        for tabla in seccion.footer.tables:
+            reemplazar_en_tabla(tabla)
+
