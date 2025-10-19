@@ -1,0 +1,18 @@
+fastapi==0.104.1
+uvicorn==0.24.0
+sqlalchemy==2.0.23
+pyodbc==5.0.1
+python-multipart==0.0.6
+pydantic==2.5.0
+python-dotenv==1.0.0
+
+# OCR y procesamiento de imágenes
+pytesseract==0.3.10
+Pillow==10.1.0
+
+# Generación de documentos
+python-docx==1.1.0
+docxtpl==0.16.7  # ← NUEVA DEPENDENCIA
+
+# Utilidades
+num2words==0.5.13
