@@ -1,0 +1,30 @@
+# Entorno virtual
+.venv/
+venv/
+
+# Archivos de entorno
+.env
+.env.*
+
+# Archivos de configuración local
+*.local
+*.log
+
+# Archivos de compilación
+__pycache__/
+*.py[cod]
+*.so
+
+# Archivos de dependencias
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Archivos de IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db

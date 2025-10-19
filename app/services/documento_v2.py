@@ -1,7 +1,11 @@
-# app/services/documento_v2.py
 """
 Servicio mejorado para generación de documentos usando docxtpl
 Reemplaza la implementación anterior con placeholders manuales
+
+VERSIÓN CORREGIDA:
+- Formato de fecha del contrato: "el veintinueve (29) de enero del año dos mil veinticinco (2025)"
+- Números en letras en minúsculas
+- Números de CUI con espacios entre dígitos
 """
 
 import datetime
@@ -38,13 +42,6 @@ class ServicioDocumentoV2:
     def generar_documento(self, db: Session, solicitud: GenerationRequest):
         """
         Genera un documento Word a partir de una plantilla y datos del usuario
-        
-        Args:
-            db: Sesión de base de datos
-            solicitud: Datos de la solicitud (empresa_id, representante_id, datos OCR)
-            
-        Returns:
-            str: Nombre del archivo generado
         """
         print("🚀 Iniciando generación de documento...")
         
@@ -79,10 +76,7 @@ class ServicioDocumentoV2:
         
         print(f"📄 Cargando plantilla: {ruta_plantilla}")
         
-        # Cargar plantilla con docxtpl
         doc = DocxTemplate(ruta_plantilla)
-        
-        # Renderizar con el contexto
         doc.render(context)
         
         # 4. Guardar documento
@@ -97,37 +91,36 @@ class ServicioDocumentoV2:
     def _preparar_contexto(self, empresa, representante, solicitud: GenerationRequest):
         """
         Prepara el contexto (diccionario) con todos los datos para la plantilla
-        
-        Returns:
-            dict: Contexto estructurado para docxtpl
         """
         colaborador = solicitud.colaborador_data.datos_persona
         contrato = solicitud.colaborador_data.datos_contrato
         
-        # --- CALCULAR EDAD DEL REPRESENTANTE ---
         rep_edad_num = (datetime.date.today() - representante['fecha_nacimiento']).days // 365
-        rep_edad_letras = num2words(rep_edad_num, lang='es').upper()
-        rep_cui_letras = self._numero_a_letras(representante['cui'])
+        rep_edad_letras = num2words(rep_edad_num, lang='es')
+        rep_cui_letras = self._numero_a_letras_con_espacios(representante['cui'])
+        rep_cui_formateado = self._formatear_cui(representante['cui'])
         
-        # --- PROCESAR NÚMEROS DE EMPRESA ---
         num_registro_letras = self._convertir_numero_letras(empresa.get('numero_registro'))
         num_libro_letras = self._convertir_numero_letras(empresa.get('numero_libro'))
         num_folio_letras = self._convertir_numero_letras(empresa.get('numero_folio'))
         
-        # --- DATOS DEL COLABORADOR ---
-        colab_cui_letras = self._numero_a_letras(colaborador.cui) if colaborador.cui else ""
-        colab_edad_letras = num2words(int(colaborador.edad), lang='es').upper() if colaborador.edad and colaborador.edad.isdigit() else ""
+        colab_cui_letras = self._numero_a_letras_con_espacios(colaborador.cui) if colaborador.cui else ""
+        colab_cui_formateado = self._formatear_cui(colaborador.cui) if colaborador.cui else ""
+        colab_edad_letras = num2words(int(colaborador.edad), lang='es') if colaborador.edad and colaborador.edad.isdigit() else ""
         
-        # --- PROCESAR FECHAS ---
         fecha_inicio_data = self._procesar_fecha(contrato.fecha_inicio)
         fecha_fin_data = self._procesar_fecha(contrato.fecha_fin)
         
-        # --- CONSTRUIR CONTEXTO ---
+        fecha_contrato_formateada = self._formato_fecha_contrato(solicitud.fecha_contrato)
+        
+        colab_nombre_titulo = self._titulo_mayusculas(colaborador.nombre_completo)
+
         context = {
-            # COLABORADOR
             'colaborador': {
                 'nombre_completo': colaborador.nombre_completo or '',
+                'nombre_completo_titulo': colab_nombre_titulo,
                 'cui': colaborador.cui or '',
+                'cui_formateado': colab_cui_formateado,
                 'cui_letras': colab_cui_letras,
                 'edad': colaborador.edad or '',
                 'edad_letras': colab_edad_letras,
@@ -137,9 +130,10 @@ class ServicioDocumentoV2:
                 'profesion': colaborador.profesion or 'N/A',
                 'posicion': colaborador.posicion or contrato.tipo_contrato or '',
                 'lugar_notificaciones': colaborador.direccion or '',
+                # --- CORRECCIÓN AQUÍ ---
+                'puesto': colaborador.posicion or contrato.tipo_contrato or '',
             },
             
-            # EMPRESA
             'empresa': {
                 'razon_social': empresa['razon_social'],
                 'autorizada_en': empresa.get('autorizada_en', ''),
@@ -157,7 +151,6 @@ class ServicioDocumentoV2:
                 'segundo_lugar_notificaciones': empresa.get('segundo_lugar_notificaciones', ''),
             },
             
-            # REPRESENTANTE LEGAL
             'representante': {
                 'nombre_completo': representante['nombre_completo'],
                 'edad': str(rep_edad_num),
@@ -166,102 +159,110 @@ class ServicioDocumentoV2:
                 'profesion': representante.get('profesion', ''),
                 'nacionalidad': representante.get('nacionalidad', ''),
                 'cui': representante['cui'],
+                'cui_formateado': rep_cui_formateado,
                 'cui_letras': rep_cui_letras,
                 'extendido_en': representante.get('extendido_en', ''),
             },
             
-            # DATOS DEL CONTRATO
             'contrato': {
-                'fecha': solicitud.fecha_contrato,
+                'fecha': fecha_contrato_formateada,
                 'monto': contrato.monto or 'Q.0.00',
                 'monto_letras': contrato.monto_en_letras or 'CERO QUETZALES EXACTOS',
                 'tipo': contrato.tipo_contrato or 'Servicios Profesionales',
             },
             
-            # FECHA DE INICIO
             'fecha_inicio': fecha_inicio_data,
-            
-            # FECHA DE FIN
             'fecha_fin': fecha_fin_data,
-            
-            # GÉNERO (para notarios)
-            'genero': 'El Notario',  # Valor por defecto
-            
-            # ALIAS PARA COMPATIBILIDAD
+            'genero': 'El Notario',
             'puesto': colaborador.posicion or contrato.tipo_contrato or '',
         }
         
         return context
 
-    def _procesar_fecha(self, fecha_str):
-        """
-        Procesa una fecha string y retorna un diccionario con diferentes formatos
-        """
-        if not fecha_str or "indefinido" in fecha_str.lower():
-            return {
-                'dia': 'N/A',
-                'dia_letras': 'N/A',
-                'mes': 'N/A',
-                'anio': 'N/A',
-                'anio_letras': 'N/A',
-                'completa': 'Por tiempo indefinido'
-            }
-        
+    def _titulo_mayusculas(self, texto):
+        if not texto:
+            return ''
+        return texto.title()
+
+    def _formato_fecha_contrato(self, fecha_str):
+        meses_esp = {
+            1: 'enero', 2: 'febrero', 3: 'marzo', 4: 'abril',
+            5: 'mayo', 6: 'junio', 7: 'julio', 8: 'agosto',
+            9: 'septiembre', 10: 'octubre', 11: 'noviembre', 12: 'diciembre'
+        }
         try:
             fecha = datetime.datetime.strptime(fecha_str, "%Y-%m-%d")
-            return {
-                'dia': fecha.day,
-                'dia_letras': num2words(fecha.day, lang='es'),
-                'mes': fecha.strftime('%B'),
-                'anio': fecha.year,
-                'anio_letras': num2words(fecha.year, lang='es'),
-                'completa': fecha.strftime('%d de %B de %Y')
-            }
+            dia_num = fecha.day
+            dia_letras = num2words(dia_num, lang='es')
+            mes_nombre = meses_esp[fecha.month]
+            anio_num = fecha.year
+            anio_letras = num2words(anio_num, lang='es')
+            return f"el {dia_letras} ({dia_num}) de {mes_nombre} del año {anio_letras} ({anio_num})"
+        except (ValueError, TypeError) as e:
+            print(f"⚠️ Error al formatear fecha del contrato: {e}")
+            return fecha_str
+
+    def _procesar_fecha(self, fecha_str):
+        meses_esp = {
+            1: 'enero', 2: 'febrero', 3: 'marzo', 4: 'abril',
+            5: 'mayo', 6: 'junio', 7: 'julio', 8: 'agosto',
+            9: 'septiembre', 10: 'octubre', 11: 'noviembre', 12: 'diciembre'
+        }
+        if not fecha_str or "indefinido" in fecha_str.lower():
+            return {'dia': 'N/A', 'dia_letras': 'N/A', 'mes': 'N/A', 'anio': 'N/A', 'anio_letras': 'N/A', 'completa': 'Por tiempo indefinido'}
+        try:
+            fecha = datetime.datetime.strptime(fecha_str, "%Y-%m-%d")
+            mes_nombre = meses_esp[fecha.month]
+            return {'dia': fecha.day, 'dia_letras': num2words(fecha.day, lang='es'), 'mes': mes_nombre, 'anio': fecha.year, 'anio_letras': num2words(fecha.year, lang='es'), 'completa': f"{fecha.day} de {mes_nombre} de {fecha.year}"}
         except (ValueError, TypeError):
-            return {
-                'dia': 'N/A',
-                'dia_letras': 'N/A',
-                'mes': 'N/A',
-                'anio': 'N/A',
-                'anio_letras': 'N/A',
-                'completa': 'Fecha no especificada'
-            }
+            return {'dia': 'N/A', 'dia_letras': 'N/A', 'mes': 'N/A', 'anio': 'N/A', 'anio_letras': 'N/A', 'completa': 'Fecha no especificada'}
 
     def _formato_fecha_largo(self, objeto_fecha):
-        """
-        Formatea una fecha en formato largo: "el cinco (5) de enero de 2025"
-        """
+        meses_esp = {
+            1: 'enero', 2: 'febrero', 3: 'marzo', 4: 'abril',
+            5: 'mayo', 6: 'junio', 7: 'julio', 8: 'agosto',
+            9: 'septiembre', 10: 'octubre', 11: 'noviembre', 12: 'diciembre'
+        }
         if not isinstance(objeto_fecha, (datetime.date, datetime.datetime)):
             return ""
-        
         day_num = objeto_fecha.day
         day_letras = num2words(day_num, lang='es')
-        month_name = objeto_fecha.strftime('%B')
-        
+        month_name = meses_esp[objeto_fecha.month]
         return f"el {day_letras} ({day_num}) de {month_name} de {objeto_fecha.year}"
 
-    def _numero_a_letras(self, numero_str):
-        """
-        Convierte cada dígito de un número a letras
-        Ejemplo: "123" -> "UNO DOS TRES"
-        """
+    def _numero_a_letras_con_espacios(self, numero_str):
         if not numero_str or not str(numero_str).isdigit():
             return ''
-        
-        return ' '.join(num2words(int(d), lang='es') for d in str(numero_str)).upper()
+        numero_str = numero_str.replace(' ', '').replace('-', '')
+        if len(numero_str) != 13:
+            return ' '.join(num2words(int(d), lang='es') for d in str(numero_str))
+        grupo1 = numero_str[0:4]
+        grupo2 = numero_str[4:9]
+        grupo3 = numero_str[9:13]
+        grupo1_letras = num2words(int(grupo1), lang='es')
+        grupo2_letras = num2words(int(grupo2), lang='es')
+        grupo3_letras = num2words(int(grupo3), lang='es')
+        return f"{grupo1_letras} espacio {grupo2_letras} espacio {grupo3_letras}"
+
+    def _formatear_cui(self, numero_str):
+        if not numero_str or not str(numero_str).isdigit():
+            return numero_str or ''
+        numero_str = numero_str.replace(' ', '').replace('-', '')
+        if len(numero_str) != 13:
+            return numero_str
+        grupo1 = numero_str[0:4]
+        grupo2 = numero_str[4:9]
+        grupo3 = numero_str[9:13]
+        return f"{grupo1} {grupo2} {grupo3}"
 
     def _convertir_numero_letras(self, numero_str):
-        """
-        Convierte un número completo a letras
-        Ejemplo: "123" -> "CIENTO VEINTITRÉS"
-        """
         if not numero_str:
             return ''
-        
         try:
             if str(numero_str).isdigit():
-                return num2words(int(numero_str), lang='es').upper()
+                return num2words(int(numero_str), lang='es')
             else:
                 return str(numero_str)
         except (ValueError, TypeError):
             return str(numero_str)
+
