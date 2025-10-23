@@ -1,0 +1,17 @@
+### 2. `.dockerignore`
+```
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+.git/
+.gitignore
+*.md
+venv/
+env/
+.vscode/
+.idea/
+*.log
+```

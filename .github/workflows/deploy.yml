@@ -1,0 +1,28 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Login Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Login ACR
+      run: az acr login --name gestiondocumentalreg
+    
+    - name: Build and Push
+      run: |
+        docker build -t gestiondocumentalreg.azurecr.io/gestion-documental:latest .
+        docker push gestiondocumentalreg.azurecr.io/gestion-documental:latest
+    
+    - name: Restart WebApp
+      run: az webapp restart --name gestion-documental-api --resource-group GestionDocumental-RG

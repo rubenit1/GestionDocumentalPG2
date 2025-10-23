@@ -28,3 +28,21 @@ pip-delete-this-directory.txt
 # Archivos de sistema
 .DS_Store
 Thumbs.db
+
+__pycache__/
+*.pyc
+.env
+.env.*
+venv/
+env/
+*.log
+.DS_Store
+templates/*.docx
+!templates/plantilla_ejemplo.docx
+# --- IGNORE ---
+# End of ignore
+# --- END IGNORE ---
+# --- END IGNORE ---
+
+
+

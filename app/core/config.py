@@ -17,7 +17,7 @@ DB_USER = os.getenv("DB_USER", "sa")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "0n4vsb")
 DB_HOST = os.getenv("DB_HOST", "RUBENDK")
 DB_NAME = os.getenv("DB_NAME", "GestionDocumentalDB")
-DB_DRIVER = os.getenv("DB_DRIVER", "ODBC Driver 17 for SQL Server")
+DB_DRIVER = os.getenv("DB_DRIVER", "ODBC Driver 18 for SQL Server")
 
 
 # Azure/OneDrive
