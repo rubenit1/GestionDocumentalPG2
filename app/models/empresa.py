@@ -1,6 +1,6 @@
 # app/models/empresa.py
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional,List
 from datetime import date
 
 class EmpresaBase(BaseModel):
@@ -22,6 +22,8 @@ class EmpresaDetalles(EmpresaBase):
 
 class EmpresaCreate(BaseModel):
     razon_social: str
+    proyecto_id: Optional[int] = None
+    representante_ids: Optional[List[int]] = None
     autorizada_en: Optional[str] = None
     fecha_autorizacion: Optional[date] = None
     autorizada_por: Optional[str] = None
