@@ -22,6 +22,7 @@ from app.models.documento import GenerationRequest, DocumentoProcesado
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter
 import io
+import uuid
 
 router = APIRouter()
 onedrive_service = OneDriveService()
@@ -131,7 +132,7 @@ async def procesar_imagen_y_generar_contrato(
         
         # Nombre descriptivo
         nombre_colaborador = datos_ocr['datos_persona']['nombre_completo'].replace(' ', '_')
-        doc_filename = f"Contrato_{nombre_colaborador}_{datetime.datetime.now().strftime('%Y%m%d')}.docx"
+        doc_filename = f"Contrato_{nombre_colaborador}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}.docx"
         doc_path = f"/Documentos_Legales/Contratos/{doc_filename}"
         
         resultado_doc = onedrive_service.subir_archivo(
