@@ -42,32 +42,24 @@ async def subir_documento(
     Sube un documento a OneDrive y registra en BD
     """
     try:
-        # Leer contenido del archivo
+        # ... (Tu lógica de leer archivo, hash, y subir a OneDrive) ...
         file_content = await file.read()
-        
-        # Calcular hash
         file_hash = onedrive_service.calcular_hash(file_content)
-        
-        # Determinar ruta en OneDrive según tipo
         rutas = {
             "contrato": "/Documentos_Legales/Contratos",
             "minuta": "/Documentos_Legales/Minutas",
             "anexo": "/Documentos_Legales/Anexos",
             "carta": "/Documentos_Legales/Cartas"
         }
-        
         base_path = rutas.get(tipo_documento, "/Documentos_Legales/Otros")
         onedrive_path = f"{base_path}/{file.filename}"
         
-        # Subir a OneDrive
-        print(f"📤 Subiendo archivo a OneDrive: {onedrive_path}")
         resultado_upload = onedrive_service.subir_archivo(
             file_path=file.filename,
             onedrive_path=onedrive_path,
             file_content=file_content
         )
         
-        # Obtener link compartido
         file_id = resultado_upload["id"]
         web_url = onedrive_service.obtener_link_compartido(file_id, tipo="view")
         
@@ -100,10 +92,17 @@ async def subir_documento(
             notas=f"Documento subido a OneDrive: {onedrive_path}"
         )
         
+        # --- AÑADIDO ---
+        db.commit()
+        db.refresh(documento) # Refresca el objeto
+        
         return documento
         
     except Exception as e:
+        # --- AÑADIDO ---
+        db.rollback() 
         print(f"❌ Error subiendo documento: {str(e)}")
+        # ... (Manejo de borrado de archivo en OneDrive si falla la BD podría ir aquí)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -115,6 +114,7 @@ def listar_documentos(
     db: Session = Depends(get_db)
 ):
     """Lista documentos con filtros opcionales"""
+    # (Este es un GET, no necesita commit)
     return documento_repo.listar(
         db=db,
         tipo_documento=tipo_documento,
@@ -126,6 +126,7 @@ def listar_documentos(
 @router.get("/{documento_id}", response_model=DocumentoDetalle)
 def obtener_documento(documento_id: int, db: Session = Depends(get_db)):
     """Obtiene detalles de un documento"""
+    # (Este es un GET, no necesita commit)
     documento = documento_repo.obtener_por_id(db, documento_id)
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
@@ -135,20 +136,18 @@ def obtener_documento(documento_id: int, db: Session = Depends(get_db)):
 @router.get("/{documento_id}/download")
 def descargar_documento(documento_id: int, db: Session = Depends(get_db)):
     """Descarga un documento desde OneDrive"""
+    # (Este es un GET, no necesita commit)
     documento = documento_repo.obtener_por_id(db, documento_id)
+    # ... (resto de tu lógica de descarga) ...
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     
     try:
-        # Descargar de OneDrive
         file_content = onedrive_service.descargar_archivo(documento['onedrive_file_id'])
-        
-        # Verificar integridad
         current_hash = onedrive_service.calcular_hash(file_content)
         if current_hash != documento['hash_sha256']:
             print(f"⚠️ ADVERTENCIA: Hash no coincide para documento {documento_id}")
         
-        # Retornar como streaming response
         return StreamingResponse(
             io.BytesIO(file_content),
             media_type="application/octet-stream",
@@ -168,54 +167,72 @@ def actualizar_documento(
     db: Session = Depends(get_db)
 ):
     """Actualiza información de un documento"""
-    documento_anterior = documento_repo.obtener_por_id(db, documento_id)
-    if not documento_anterior:
-        raise HTTPException(status_code=404, detail="Documento no encontrado")
-    
-    # Actualizar en BD
-    documento_repo.actualizar(
-        db=db,
-        documento_id=documento_id,
-        nombre_archivo=actualizacion.nombre_archivo,
-        estado=actualizacion.estado,
-        empresa_id=actualizacion.empresa_id,
-        representante_id=actualizacion.representante_id,
-        notas=actualizacion.notas
-    )
-    
-    # Registrar cambios en historial
-    if actualizacion.estado and actualizacion.estado != documento_anterior['estado']:
-        documento_repo.registrar_historial(
+    try:
+        documento_anterior = documento_repo.obtener_por_id(db, documento_id)
+        if not documento_anterior:
+            raise HTTPException(status_code=404, detail="Documento no encontrado")
+        
+        # Actualizar en BD
+        documento_repo.actualizar(
             db=db,
             documento_id=documento_id,
-            accion="actualizado",
-            usuario_id=USUARIO_ACTUAL_ID,
-            campo_modificado="estado",
-            valor_anterior=documento_anterior['estado'],
-            valor_nuevo=actualizacion.estado
+            nombre_archivo=actualizacion.nombre_archivo,
+            estado=actualizacion.estado,
+            empresa_id=actualizacion.empresa_id,
+            representante_id=actualizacion.representante_id,
+            notas=actualizacion.notas
         )
-    
-    return documento_repo.obtener_por_id(db, documento_id)
+        
+        # Registrar cambios en historial
+        if actualizacion.estado and actualizacion.estado != documento_anterior['estado']:
+            documento_repo.registrar_historial(
+                db=db,
+                documento_id=documento_id,
+                accion="actualizado",
+                usuario_id=USUARIO_ACTUAL_ID,
+                campo_modificado="estado",
+                valor_anterior=documento_anterior['estado'],
+                valor_nuevo=actualizacion.estado
+            )
+        
+        # --- AÑADIDO ---
+        db.commit()
+        
+        return documento_repo.obtener_por_id(db, documento_id)
+        
+    except Exception as e:
+        # --- AÑADIDO ---
+        db.rollback()
+        raise e
 
 
 @router.delete("/{documento_id}")
 def eliminar_documento(documento_id: int, db: Session = Depends(get_db)):
     """Elimina lógicamente un documento (no lo borra de OneDrive)"""
-    documento = documento_repo.obtener_por_id(db, documento_id)
-    if not documento:
-        raise HTTPException(status_code=404, detail="Documento no encontrado")
-    
-    documento_repo.eliminar(db, documento_id)
-    
-    documento_repo.registrar_historial(
-        db=db,
-        documento_id=documento_id,
-        accion="eliminado",
-        usuario_id=USUARIO_ACTUAL_ID,
-        notas="Documento marcado como anulado"
-    )
-    
-    return {"message": "Documento eliminado exitosamente"}
+    try:
+        documento = documento_repo.obtener_por_id(db, documento_id)
+        if not documento:
+            raise HTTPException(status_code=404, detail="Documento no encontrado")
+        
+        documento_repo.eliminar(db, documento_id)
+        
+        documento_repo.registrar_historial(
+            db=db,
+            documento_id=documento_id,
+            accion="eliminado",
+            usuario_id=USUARIO_ACTUAL_ID,
+            notas="Documento marcado como anulado"
+        )
+        
+        # --- AÑADIDO ---
+        db.commit()
+        
+        return {"message": "Documento eliminado exitosamente"}
+
+    except Exception as e:
+        # --- AÑADIDO ---
+        db.rollback()
+        raise e
 
 
 @router.post("/{documento_id}/cambiar-estado")
@@ -226,54 +243,57 @@ def cambiar_estado(
 ):
     """
     Cambia el estado de un documento
-    Estados: borrador, revision, aprobado, firmado, archivado, anulado
     """
-    estados_validos = ["borrador", "revision", "aprobado", "firmado", "archivado", "anulado"]
-    if nuevo_estado not in estados_validos:
-        raise HTTPException(status_code=400, detail=f"Estado inválido. Use: {estados_validos}")
-    
-    documento_anterior = documento_repo.obtener_por_id(db, documento_id)
-    if not documento_anterior:
-        raise HTTPException(status_code=404, detail="Documento no encontrado")
-    
-    documento_repo.actualizar_estado(db, documento_id, nuevo_estado)
-    
-    documento_repo.registrar_historial(
-        db=db,
-        documento_id=documento_id,
-        accion="cambio_estado",
-        usuario_id=USUARIO_ACTUAL_ID,
-        campo_modificado="estado",
-        valor_anterior=documento_anterior['estado'],
-        valor_nuevo=nuevo_estado
-    )
-    
-    return {"message": f"Estado actualizado a: {nuevo_estado}"}
+    try:
+        estados_validos = ["borrador", "revision", "aprobado", "firmado", "archivado", "anulado"]
+        if nuevo_estado not in estados_validos:
+            raise HTTPException(status_code=400, detail=f"Estado inválido. Use: {estados_validos}")
+        
+        documento_anterior = documento_repo.obtener_por_id(db, documento_id)
+        if not documento_anterior:
+            raise HTTPException(status_code=404, detail="Documento no encontrado")
+        
+        documento_repo.actualizar_estado(db, documento_id, nuevo_estado)
+        
+        documento_repo.registrar_historial(
+            db=db,
+            documento_id=documento_id,
+            accion="cambio_estado",
+            usuario_id=USUARIO_ACTUAL_ID,
+            campo_modificado="estado",
+            valor_anterior=documento_anterior['estado'],
+            valor_nuevo=nuevo_estado
+        )
+        
+        # --- AÑADIDO ---
+        db.commit()
+        
+        return {"message": f"Estado actualizado a: {nuevo_estado}"}
 
+    except Exception as e:
+        # --- AÑADIDO ---
+        db.rollback()
+        raise e
+
+
+# ... (El resto de tus endpoints GET no necesitan cambios) ...
 
 @router.get("/{documento_id}/historial", response_model=List[HistorialDocumento])
 def obtener_historial(documento_id: int, db: Session = Depends(get_db)):
-    """Obtiene el historial completo de un documento"""
     documento = documento_repo.obtener_por_id(db, documento_id)
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
-    
     return documento_repo.obtener_historial(db, documento_id)
-
 
 @router.get("/buscar/{query}")
 def buscar_documentos(query: str, db: Session = Depends(get_db)):
-    """Busca documentos por contenido o nombre"""
     return documento_repo.buscar_por_contenido(db, query)
-
 
 @router.get("/{documento_id}/link-onedrive")
 def obtener_link_onedrive(documento_id: int, db: Session = Depends(get_db)):
-    """Obtiene el link directo a OneDrive para ver el documento"""
     documento = documento_repo.obtener_por_id(db, documento_id)
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
-    
     return {
         "onedrive_url": documento['onedrive_web_url'],
         "nombre_archivo": documento['nombre_archivo']

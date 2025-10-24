@@ -183,7 +183,7 @@ async def procesar_imagen_y_generar_contrato(
         )
         
         print(f"✅ Registro creado en BD: ID {documento['id']}")
-        
+        db.commit()
         # ===== LIMPIAR ARCHIVO LOCAL =====
         import os
         try:

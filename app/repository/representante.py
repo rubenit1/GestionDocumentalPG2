@@ -23,7 +23,7 @@ class RepresentanteRepository:
             representante.dict()
         )
         new_id_row = result.mappings().first()
-        db.commit()
+
         
         new_id = new_id_row['id']
         created_representante = self.get_by_id(db, new_id)
@@ -44,9 +44,8 @@ class RepresentanteRepository:
             """),
             params
         )
-        db.commit()
+
 
     def delete(self, db: Session, id: int):
         # ... (esta función se mantiene igual)
         db.execute(text("EXEC dbo.sp_CRUD_RepresentanteLegal @Accion='Eliminar', @id=:id"), {'id': id})
-        db.commit()

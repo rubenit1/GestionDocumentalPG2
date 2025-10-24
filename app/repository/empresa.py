@@ -1,10 +1,15 @@
+from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.models.empresa import EmpresaCreate, EmpresaUpdate
 
 class EmpresaRepository:
-    def get_all(self, db: Session):
-        return db.execute(text("EXEC dbo.sp_CRUD_Empresa @Accion='Listar'")).mappings().all()
+
+    def get_all(self, db: Session, proyecto_id: Optional[int] = None):
+        return db.execute(
+            text("EXEC dbo.sp_CRUD_Empresa @Accion='Listar', @proyecto_id=:proyecto_id"),
+            {'proyecto_id': proyecto_id}
+        ).mappings().all()
 
     def get_by_razon_social(self, db: Session, razon_social: str):
         return db.execute(
@@ -32,8 +37,8 @@ class EmpresaRepository:
         # 2. Obtenemos la fila con el nuevo ID
         new_id_row = result.mappings().first()
         
-        # 3. Confirmamos la transacción
-        db.commit()
+        # 3. NO HACEMOS COMMIT AQUÍ
+        # db.commit() <--- ELIMINADO
 
         # 4. Usamos el ID para obtener el objeto completo y limpio
         new_id = new_id_row['id']
@@ -43,7 +48,6 @@ class EmpresaRepository:
         return created_empresa
 
     def update(self, db: Session, id: int, empresa: EmpresaUpdate):
-        # ... (esta función se mantiene igual)
         params = empresa.dict(exclude_unset=True)
         params['id'] = id
         db.execute(
@@ -58,9 +62,24 @@ class EmpresaRepository:
             """),
             params
         )
-        db.commit()
+        # NO HACEMOS COMMIT AQUÍ
+        # db.commit() <--- ELIMINADO
 
     def delete(self, db: Session, id: int):
-        # ... (esta función se mantiene igual)
         db.execute(text("EXEC dbo.sp_CRUD_Empresa @Accion='Eliminar', @id=:id"), {'id': id})
-        db.commit()
+        # NO HACEMOS COMMIT AQUÍ
+        # db.commit() <--- ELIMINADO
+
+    # --- AÑADE ESTE MÉTODO ---
+    def asignar_proyecto(self, db: Session, empresa_id: int, proyecto_id: int):
+        """Asigna un proyecto a una empresa"""
+        db.execute(
+            text("""
+                EXEC dbo.sp_CRUD_EmpresaProyecto
+                    @Accion = 'Asignar',
+                    @empresa_id = :empresa_id,
+                    @proyecto_id = :proyecto_id
+            """),
+            {"empresa_id": empresa_id, "proyecto_id": proyecto_id}
+        )
+        # NO HACEMOS COMMIT AQUÍ

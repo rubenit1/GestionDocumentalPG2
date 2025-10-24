@@ -23,4 +23,3 @@ class PlantillaRepository:
             """),
             params
         )
-        db.commit()
