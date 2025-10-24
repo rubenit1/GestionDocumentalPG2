@@ -23,6 +23,9 @@ class DocumentoBase(BaseModel):
     estado: str
     fecha_creacion: datetime
     onedrive_web_url: Optional[str] = None
+    empresa_nombre: Optional[str] = None
+    class Config:
+        from_attributes = True
 
 class DocumentoDetalle(DocumentoBase):
     onedrive_path: str
