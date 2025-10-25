@@ -33,11 +33,17 @@ def create_representante(representante: RepresentanteCreate, db: Session = Depen
     """
     try:
         nuevo_representante = repo.create(db, representante)
-        db.commit()  # <-- AÑADIDO
-        db.refresh(nuevo_representante) # Opcional: Refresca el objeto desde la BD
+        db.commit()
+        db.refresh(nuevo_representante) 
         return nuevo_representante
     except Exception as e:
-        db.rollback() # <-- AÑADIDO
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Ya existe un representante con el CUI {representante.cui}"
+        )
+    except Exception as e:
+        db.rollback()
         raise e
 
 @router.put("/{id}")

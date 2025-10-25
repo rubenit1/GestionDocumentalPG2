@@ -6,6 +6,7 @@ from app.repository.empresa_representante import EmpresaRepresentanteRepository
 from app.models.empresa_representante import EmpresaRepresentanteCreate
 from app.models.empresa import EmpresaCreate, EmpresaUpdate
 from typing import Optional
+from sqlalchemy.exc import IntegrityError
 
 class EmpresaService:
     def __init__(self):
