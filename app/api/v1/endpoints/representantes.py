@@ -38,14 +38,14 @@ def create_representante(representante: RepresentanteCreate, db: Session = Depen
         return nuevo_representante
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Ya existe un representante con el CUI {representante.cui}"
-        )
-    except Exception as e:
-        db.rollback()
-        raise e
-
+        # Verificar si es error de CUI duplicado
+        if "cui" in str(e).lower() or "unique" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Ya existe un representante con el CUI {representante.cui}"
+            )
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @router.put("/{id}")
 def update_representante(id: int, representante: RepresentanteUpdate, db: Session = Depends(get_db)):
     """
