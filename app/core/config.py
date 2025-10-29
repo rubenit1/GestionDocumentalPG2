@@ -13,18 +13,11 @@ load_dotenv()
 # =============================================
 # CONFIGURACIÓN DE BASE DE DATOS
 # =============================================
-DB_USER = os.getenv("DB_USER", "sa")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "0n4vsb")
-DB_HOST = os.getenv("DB_HOST", "RUBENDK")
-DB_NAME = os.getenv("DB_NAME", "GestionDocumentalDB")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_NAME = os.getenv("DB_NAME")
 DB_DRIVER = os.getenv("DB_DRIVER", "ODBC Driver 18 for SQL Server")
-
-
-# Azure/OneDrive
-AZURE_CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
-AZURE_CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
-AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID")
-ONEDRIVE_USER_ID = os.getenv("ONEDRIVE_USER_ID")
 
 SQLALCHEMY_DATABASE_URL = f"mssql+pyodbc://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}?driver={DB_DRIVER.replace(' ', '+')}"
 
@@ -41,18 +34,16 @@ AZURE_CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
 AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID")
 ONEDRIVE_USER_ID = os.getenv("ONEDRIVE_USER_ID")
 
+# ==== CONFIGURACIÓN DE JWT ====
+JWT_SECRET = os.getenv("JWT_SECRET", "change_me")  # valor de Azure App Settings
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_EXPIRES_MINUTES = int(os.getenv("JWT_EXPIRES_MINUTES", "480"))
+
 # Validación de configuración de Azure
 if not all([AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, ONEDRIVE_USER_ID]):
     print("⚠️ ADVERTENCIA: Variables de Azure/OneDrive no configuradas")
     print("   Los endpoints de OneDrive no funcionarán correctamente")
     print("   Configura .env con las credenciales de Azure AD")
-
-# =============================================
-# CONFIGURACIÓN DE AUTENTICACIÓN JWT (FUTURO)
-# =============================================
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "secret-key-por-defecto-cambiar-en-produccion")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-JWT_EXPIRATION_MINUTES = int(os.getenv("JWT_EXPIRATION_MINUTES", "60"))
 
 # =============================================
 # RUTAS DE ONEDRIVE (CONFIGURABLES)
