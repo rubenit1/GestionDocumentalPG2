@@ -27,21 +27,20 @@ class AuthService:
         db.commit()
 
     def login(self, db: Session, login: str, password: str):
-        # 1. Validar que tenemos config JWT cargada
+        # 1. Seguridad básica: Configuración JWT cargada
         if not JWT_SECRET or JWT_SECRET == "change_me":
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="JWT_SECRET no está configurado en el entorno"
             )
 
-        # 2. Intentar leer el usuario desde BD
+        # 2. Obtener usuario desde BD via SP
         try:
             result = db.execute(
                 text("EXEC dbo.sp_Auth_Login @login=:login"),
                 {"login": login}
             ).mappings().first()
         except Exception as e:
-            # falla al ejecutar el SP o al conectar a la BD
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error al consultar BD/sp_Auth_Login: {str(e)}"
@@ -53,7 +52,7 @@ class AuthService:
                 detail="Usuario no encontrado"
             )
 
-        # Ahora asegurarnos que las columnas que esperamos realmente llegaron
+        # asegurarnos que el SP devolvió las columnas que necesitamos
         campos_esperados = ["id", "username", "email", "password_hash", "rol", "is_active"]
         for campo in campos_esperados:
             if campo not in result:
@@ -71,42 +70,63 @@ class AuthService:
         user_id = result["id"]
         stored_value = result["password_hash"]
 
-        # 3. Lógica de verificación / migración
-        password_ok = False
-        is_bcrypt = False
+        #
+        # 3. Verificación / migración de contraseña
+        #
 
-        try:
-            if stored_value and str(stored_value).startswith(("$2a$", "$2b$", "$2y$")):
-                is_bcrypt = True
-                if bcrypt.verify(password, stored_value):
-                    password_ok = True
-        except Exception as e:
-            # bcrypt lanzó error raro
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error verificando bcrypt: {str(e)}"
-            )
+        # Caso 1: ya es bcrypt ($2a$ / $2b$ / $2y$)
+        if stored_value and str(stored_value).startswith(("$2a$", "$2b$", "$2y$")):
+            try:
+                if not bcrypt.verify(password, stored_value):
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Credenciales inválidas"
+                    )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error verificando bcrypt: {str(e)}"
+                )
 
-        # fallback: texto plano temporal
-        if not password_ok and not is_bcrypt:
-            if password == stored_value:
-                password_ok = True
+        # Caso 2: hash viejo tipo $5$... (sha256_crypt u otro formato largo)
+        elif stored_value and stored_value.startswith("$5$"):
+            # Permitimos acceso solo si el admin nos da la clave temporal acordada.
+            # Luego migramos esa clave a bcrypt.
+            if password == "Temporal123!":
                 try:
                     nuevo_hash = bcrypt.hash(password)
                     self._actualizar_hash_en_bd(db, user_id, nuevo_hash)
                 except Exception as e:
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"No se pudo migrar password a bcrypt: {str(e)}"
+                        detail=f"No se pudo migrar desde sha256_crypt a bcrypt: {str(e)}"
                     )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Credenciales inválidas"
+                )
 
-        if not password_ok:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Credenciales inválidas"
-            )
+        # Caso 3: la BD tiene la clave en texto plano (ej: 'Temporal123!')
+        else:
+            if password == stored_value:
+                try:
+                    nuevo_hash = bcrypt.hash(password)
+                    self._actualizar_hash_en_bd(db, user_id, nuevo_hash)
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"No se pudo migrar password plano a bcrypt: {str(e)}"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Credenciales inválidas"
+                )
 
-        # 4. Construir token JWT
+        #
+        # 4. Generar token JWT
+        #
         try:
             expire = datetime.utcnow() + timedelta(minutes=JWT_EXPIRES_MINUTES)
             payload = {
@@ -122,7 +142,7 @@ class AuthService:
                 detail=f"Error generando JWT: {str(e)}"
             )
 
-        # 5. Responder
+        # 5. Responder al cliente
         return {
             "token": token,
             "user": {
@@ -149,7 +169,7 @@ class AuthService:
             )
 
     def crear_usuario(self, db: Session, username: str, email: str, password_plano: str, rol: str):
-        from passlib.hash import bcrypt
+        # validar que no exista
         existente = db.execute(
             text("""
                 SELECT TOP 1 id FROM dbo.usuarios
@@ -191,7 +211,6 @@ class AuthService:
         }
 
     def reset_password(self, db: Session, user_id: int, nueva_clave: str):
-        from passlib.hash import bcrypt
         hashed = bcrypt.hash(nueva_clave)
 
         result = db.execute(
@@ -221,4 +240,3 @@ class AuthService:
         }
 
 auth_service = AuthService()
-# =============================================

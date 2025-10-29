@@ -7,12 +7,19 @@ from app.services.auth_service import auth_service
 
 router = APIRouter()
 
+# Swagger/fastapi docs saben que el token viene como Bearer <token>
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-# =============== LOGIN / SESSION ===============
-
+# === LOGIN ===
 @router.post("/login")
 def login(body: dict, db: Session = Depends(get_db)):
+    """
+    body esperado:
+    {
+        "login": "usuario_o_email",
+        "password": "Clave"
+    }
+    """
     login_val = body.get("login")
     password = body.get("password")
 
@@ -23,11 +30,13 @@ def login(body: dict, db: Session = Depends(get_db)):
         )
 
     data = auth_service.login(db, login_val, password)
+
     return {
         "ok": True,
-        **data
+        **data  # incluye token + user
     }
 
+# === QUIEN SOY ===
 @router.get("/me")
 def me(token: str = Depends(oauth2_scheme)):
     user = auth_service.decode_token(token)
@@ -36,6 +45,7 @@ def me(token: str = Depends(oauth2_scheme)):
         "user": user
     }
 
+# === DEPENDENCIAS PARA PROTEGER RUTAS ===
 def get_current_user(token: str = Depends(oauth2_scheme)):
     return auth_service.decode_token(token)
 
@@ -49,20 +59,18 @@ def require_roles(roles_permitidos: list[str]):
         return user
     return checker
 
-# =============== ADMIN: CREAR USUARIO ===============
-
+# === ADMIN: CREAR USUARIO ===
 @router.post(
     "/crear-usuario",
     dependencies=[Depends(require_roles(["admin"]))],
 )
 def crear_usuario(body: dict, db: Session = Depends(get_db)):
     """
-    Espera:
     {
         "username": "nuevoUser",
         "email": "nuevo@empresa.com",
-        "password": "ClaveTemporal123",
-        "rol": "legal"   # o "admin", "user", etc.
+        "password": "ClaveTemporal123!",
+        "rol": "legal"
     }
     """
     username = body.get("username")
@@ -89,18 +97,16 @@ def crear_usuario(body: dict, db: Session = Depends(get_db)):
         "user": nuevo
     }
 
-# =============== ADMIN: RESET PASSWORD ===============
-
+# === ADMIN: RESET PASSWORD ===
 @router.post(
     "/reset-password",
     dependencies=[Depends(require_roles(["admin"]))],
 )
 def reset_password(body: dict, db: Session = Depends(get_db)):
     """
-    Espera:
     {
-        "user_id": 12,
-        "new_password": "ClaveNueva2025"
+        "user_id": 1,
+        "new_password": "MiClaveFinalSegura2025!"
     }
     """
     user_id = body.get("user_id")
