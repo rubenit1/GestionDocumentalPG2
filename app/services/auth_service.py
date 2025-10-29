@@ -3,7 +3,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from passlib.hash import bcrypt
-from jose import jwt
+from jose import jwt, JWTError
 
 from app.core.config import (
     JWT_SECRET,
@@ -13,7 +13,6 @@ from app.core.config import (
 
 class AuthService:
     def _actualizar_hash_en_bd(self, db: Session, user_id: int, new_hash: str):
-        # Guardamos el nuevo hash seguro en la BD
         db.execute(
             text("""
                 UPDATE dbo.usuarios
@@ -28,17 +27,40 @@ class AuthService:
         db.commit()
 
     def login(self, db: Session, login: str, password: str):
-        # 1. Traer usuario usando SP
-        result = db.execute(
-            text("EXEC dbo.sp_Auth_Login @login=:login"),
-            {"login": login}
-        ).mappings().first()
+        # 1. Validar que tenemos config JWT cargada
+        if not JWT_SECRET or JWT_SECRET == "change_me":
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="JWT_SECRET no está configurado en el entorno"
+            )
+
+        # 2. Intentar leer el usuario desde BD
+        try:
+            result = db.execute(
+                text("EXEC dbo.sp_Auth_Login @login=:login"),
+                {"login": login}
+            ).mappings().first()
+        except Exception as e:
+            # falla al ejecutar el SP o al conectar a la BD
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error al consultar BD/sp_Auth_Login: {str(e)}"
+            )
 
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Usuario no encontrado"
             )
+
+        # Ahora asegurarnos que las columnas que esperamos realmente llegaron
+        campos_esperados = ["id", "username", "email", "password_hash", "rol", "is_active"]
+        for campo in campos_esperados:
+            if campo not in result:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"El SP no devolvió la columna '{campo}'"
+                )
 
         if not result["is_active"]:
             raise HTTPException(
@@ -49,42 +71,58 @@ class AuthService:
         user_id = result["id"]
         stored_value = result["password_hash"]
 
-        # 2. Intento #1: verificar como bcrypt
+        # 3. Lógica de verificación / migración
         password_ok = False
         is_bcrypt = False
 
-        if stored_value and str(stored_value).startswith(("$2a$", "$2b$", "$2y$")):
-            # Ya es hash bcrypt
-            is_bcrypt = True
-            if bcrypt.verify(password, stored_value):
-                password_ok = True
+        try:
+            if stored_value and str(stored_value).startswith(("$2a$", "$2b$", "$2y$")):
+                is_bcrypt = True
+                if bcrypt.verify(password, stored_value):
+                    password_ok = True
+        except Exception as e:
+            # bcrypt lanzó error raro
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error verificando bcrypt: {str(e)}"
+            )
 
-        # 3. Intento #2 (fallback): comparar directo el texto plano
-        #    SOLO si no era bcrypt
+        # fallback: texto plano temporal
         if not password_ok and not is_bcrypt:
             if password == stored_value:
                 password_ok = True
-                # Migrar inmediatamente a bcrypt.hash(...)
-                nuevo_hash = bcrypt.hash(password)
-                self._actualizar_hash_en_bd(db, user_id, nuevo_hash)
+                try:
+                    nuevo_hash = bcrypt.hash(password)
+                    self._actualizar_hash_en_bd(db, user_id, nuevo_hash)
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"No se pudo migrar password a bcrypt: {str(e)}"
+                    )
 
         if not password_ok:
-            # Ninguna validación pasó
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Credenciales inválidas"
             )
 
-        # 4. Generar token JWT
-        expire = datetime.utcnow() + timedelta(minutes=JWT_EXPIRES_MINUTES)
-        payload = {
-            "sub": str(result["id"]),
-            "username": result["username"],
-            "rol": result["rol"],
-            "exp": expire,
-        }
-        token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        # 4. Construir token JWT
+        try:
+            expire = datetime.utcnow() + timedelta(minutes=JWT_EXPIRES_MINUTES)
+            payload = {
+                "sub": str(result["id"]),
+                "username": result["username"],
+                "rol": result["rol"],
+                "exp": expire,
+            }
+            token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error generando JWT: {str(e)}"
+            )
 
+        # 5. Responder
         return {
             "token": token,
             "user": {
@@ -97,7 +135,6 @@ class AuthService:
         }
 
     def decode_token(self, token: str):
-        from jose import JWTError
         try:
             data = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
             return {
@@ -112,11 +149,7 @@ class AuthService:
             )
 
     def crear_usuario(self, db: Session, username: str, email: str, password_plano: str, rol: str):
-        """
-        Alta de usuario (solo para admins). Siempre guarda hash bcrypt.
-        Devuelve el usuario creado.
-        """
-        # 1. Validar que no exista el username/email
+        from passlib.hash import bcrypt
         existente = db.execute(
             text("""
                 SELECT TOP 1 id FROM dbo.usuarios
@@ -131,10 +164,8 @@ class AuthService:
                 detail="El usuario o correo ya existe"
             )
 
-        # 2. Hash de la contraseña
         hashed = bcrypt.hash(password_plano)
 
-        # 3. Insert
         result = db.execute(
             text("""
                 INSERT INTO dbo.usuarios (username, email, password_hash, rol, is_active)
@@ -160,9 +191,7 @@ class AuthService:
         }
 
     def reset_password(self, db: Session, user_id: int, nueva_clave: str):
-        """
-        Resetea la contraseña de un usuario dado. Siempre reescribe con hash bcrypt.
-        """
+        from passlib.hash import bcrypt
         hashed = bcrypt.hash(nueva_clave)
 
         result = db.execute(
@@ -192,3 +221,4 @@ class AuthService:
         }
 
 auth_service = AuthService()
+# =============================================
