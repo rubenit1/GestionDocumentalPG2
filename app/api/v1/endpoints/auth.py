@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -7,17 +7,17 @@ from app.services.auth_service import auth_service
 
 router = APIRouter()
 
-# Swagger/fastapi docs saben que el token viene como Bearer <token>
+# Esto le dice a FastAPI/Swagger que el token va en Authorization: Bearer <token>
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-# === LOGIN ===
+# ========= LOGIN =========
 @router.post("/login")
 def login(body: dict, db: Session = Depends(get_db)):
     """
-    body esperado:
+    Body esperado:
     {
-        "login": "usuario_o_email",
-        "password": "Clave"
+        "login": "admin@empresa.com" o "admin",
+        "password": "Temporal123!"
     }
     """
     login_val = body.get("login")
@@ -25,7 +25,7 @@ def login(body: dict, db: Session = Depends(get_db)):
 
     if not login_val or not password:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail="Faltan credenciales"
         )
 
@@ -33,44 +33,59 @@ def login(body: dict, db: Session = Depends(get_db)):
 
     return {
         "ok": True,
-        **data  # incluye token + user
+        **data  # token + user
     }
 
-# === QUIEN SOY ===
+# ========= QUIÉN SOY =========
 @router.get("/me")
 def me(token: str = Depends(oauth2_scheme)):
+    """
+    Devuelve info del usuario autenticado a partir del JWT.
+    Sirve para que el frontend reconstruya sesión.
+    """
     user = auth_service.decode_token(token)
     return {
         "ok": True,
         "user": user
     }
 
-# === DEPENDENCIAS PARA PROTEGER RUTAS ===
+# ========= DEPENDENCIAS REUSABLES =========
 def get_current_user(token: str = Depends(oauth2_scheme)):
+    """
+    Úsalo en cualquier endpoint que quieras proteger con login.
+    Ejemplo:
+        dependencies=[Depends(get_current_user)]
+    """
     return auth_service.decode_token(token)
 
 def require_roles(roles_permitidos: list[str]):
+    """
+    Úsalo en endpoints que quieras restringir por rol ("admin", "legal", etc.).
+    Ejemplo:
+        dependencies=[Depends(require_roles(["admin"]))]
+    """
     def checker(user = Depends(get_current_user)):
         if user["rol"] not in roles_permitidos:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=403,
                 detail="Sin permiso"
             )
         return user
     return checker
 
-# === ADMIN: CREAR USUARIO ===
+# ========= ADMIN: CREAR USUARIO NUEVO =========
 @router.post(
     "/crear-usuario",
     dependencies=[Depends(require_roles(["admin"]))],
 )
 def crear_usuario(body: dict, db: Session = Depends(get_db)):
     """
+    Body esperado:
     {
         "username": "nuevoUser",
         "email": "nuevo@empresa.com",
-        "password": "ClaveTemporal123!",
-        "rol": "legal"
+        "password": "ClaveTemporalInicial!",
+        "rol": "legal"   # o "admin", etc.
     }
     """
     username = body.get("username")
@@ -80,7 +95,7 @@ def crear_usuario(body: dict, db: Session = Depends(get_db)):
 
     if not username or not email or not password_plano or not rol:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail="Faltan campos obligatorios"
         )
 
@@ -97,13 +112,14 @@ def crear_usuario(body: dict, db: Session = Depends(get_db)):
         "user": nuevo
     }
 
-# === ADMIN: RESET PASSWORD ===
+# ========= ADMIN: RESET PASSWORD =========
 @router.post(
     "/reset-password",
     dependencies=[Depends(require_roles(["admin"]))],
 )
 def reset_password(body: dict, db: Session = Depends(get_db)):
     """
+    Body esperado:
     {
         "user_id": 1,
         "new_password": "MiClaveFinalSegura2025!"
@@ -114,7 +130,7 @@ def reset_password(body: dict, db: Session = Depends(get_db)):
 
     if not user_id or not nueva:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail="Faltan campos"
         )
 
