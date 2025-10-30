@@ -10,7 +10,8 @@ from app.api.v1.endpoints import (
     documentos_onedrive,
     flujo_completo,
     proyectos,
-    auth,  # 👈 importante
+    empresa_proyecto,
+    auth,
 )
 
 api_router = APIRouter()
@@ -87,5 +88,12 @@ api_router.include_router(
     documentos_onedrive.router,
     prefix="/documentos-onedrive",
     tags=["Documentos OneDrive"],
+    dependencies=[require_auth],
+)
+
+api_router.include_router(
+    empresa_proyecto.router,
+    prefix="/empresa-proyecto",
+    tags=["Empresa-Proyecto"],
     dependencies=[require_auth],
 )
