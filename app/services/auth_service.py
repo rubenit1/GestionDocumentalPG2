@@ -32,30 +32,22 @@ class AuthService:
 
     def login(self, db: Session, login: str, password: str):
         """
-        Autentica al usuario y devuelve token JWT + datos básicos de usuario.
+        Autentica al usuario y devuelve un token JWT junto con sus datos básicos.
 
         Flujo:
-        - Leemos el usuario via SP sp_Auth_Login (por username o email).
-        - Si el password_hash ya está en bcrypt ($2a$ / $2b$ / $2y$):
-            - verificamos con bcrypt.verify()
-        - Si NO está en bcrypt (hash legacy tipo $5$... o cualquier otra cosa vieja):
-            - solo aceptamos la clave temporal "Temporal123!"
-            - migramos inmediatamente a bcrypt con esa clave
-        - generamos el JWT
+        - Obtiene el usuario mediante el SP dbo.sp_Auth_Login (por username o email).
+        - Verifica la contraseña con bcrypt.verify().
+        - Genera y devuelve el JWT con la información básica del usuario.
         """
 
-        #
-        # 1. Seguridad básica: JWT configurado
-        #
+        # 1. Validar configuración del JWT
         if not JWT_SECRET or JWT_SECRET == "change_me":
             raise HTTPException(
                 status_code=500,
                 detail="JWT_SECRET no está configurado en el entorno"
             )
 
-        #
-        # 2. Obtener usuario desde BD via SP
-        #
+        # 2. Consultar el usuario en la BD
         try:
             result = db.execute(
                 text("EXEC dbo.sp_Auth_Login @login=:login"),
@@ -73,9 +65,7 @@ class AuthService:
                 detail="Usuario no encontrado"
             )
 
-        #
-        # 3. Validar que el SP devolvió lo que necesitamos
-        #
+        # 3. Validar columnas esperadas
         campos_esperados = ["id", "username", "email", "password_hash", "rol", "is_active"]
         for campo in campos_esperados:
             if campo not in result:
@@ -93,60 +83,24 @@ class AuthService:
         user_id = result["id"]
         stored_value = result["password_hash"] or ""
 
-        #
-        # 4. AUTENTICACIÓN
-        #
-
-        # Caso A: ya está en bcrypt
-        # bcrypt genera hashes que empiezan con $2a$, $2b$ o $2y$
-        if stored_value.startswith(("$2a$", "$2b$", "$2y$")):
-            try:
-                valido = bcrypt.verify(password, stored_value)
-            except Exception as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Error verificando bcrypt: {str(e)}"
-                )
-
-            if not valido:
+        # 4. Verificar bcrypt
+        try:
+            if not bcrypt.verify(password, stored_value):
                 raise HTTPException(
                     status_code=401,
                     detail="Credenciales inválidas"
                 )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error verificando bcrypt: {str(e)}"
+            )
 
-        else:
-            # Caso B: NO es bcrypt.
-            # Esto cubre:
-            # - hashes viejos largos tipo "$5$rounds=..."
-            # - claves en texto plano heredadas
-            # - basura vieja que dejó otra versión del sistema
-            #
-            # Aquí entramos en "modo rescate":
-            # Aceptamos SOLO la clave maestra temporal conocida ("Temporal123!").
-            # Si coincide, migramos inmediatamente a bcrypt y actualizamos la BD.
-            #
-            if password != "Temporal123!":
-                raise HTTPException(
-                    status_code=401,
-                    detail="Credenciales inválidas"
-                )
-
-            try:
-                nuevo_hash = bcrypt.hash(password)
-                self._actualizar_hash_en_bd(db, user_id, nuevo_hash)
-            except Exception as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"No se pudo migrar password legacy a bcrypt: {str(e)}"
-                )
-
-        #
         # 5. Generar token JWT
-        #
         try:
             expire = datetime.utcnow() + timedelta(minutes=JWT_EXPIRES_MINUTES)
             payload = {
-                "sub": str(result["id"]),
+                "sub": str(user_id),
                 "username": result["username"],
                 "rol": result["rol"],
                 "exp": expire,
@@ -158,9 +112,7 @@ class AuthService:
                 detail=f"Error generando JWT: {str(e)}"
             )
 
-        #
         # 6. Respuesta final
-        #
         return {
             "token": token,
             "user": {
@@ -194,7 +146,6 @@ class AuthService:
         Crea un usuario nuevo con contraseña en bcrypt.
         Solo debería usarse desde un endpoint protegido por rol "admin".
         """
-        # Validar que no exista usuario/ correo
         existente = db.execute(
             text("""
                 SELECT TOP 1 id FROM dbo.usuarios
@@ -209,10 +160,8 @@ class AuthService:
                 detail="El usuario o correo ya existe"
             )
 
-        # Hashear la clave nueva
         hashed = bcrypt.hash(password_plano)
 
-        # Insertar y devolver el registro creado
         result = db.execute(
             text("""
                 INSERT INTO dbo.usuarios (username, email, password_hash, rol, is_active)
