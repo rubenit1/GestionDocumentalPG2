@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import text 
 
 from app.db.session import get_db
 from app.services.auth_service import auth_service
