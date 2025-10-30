@@ -141,47 +141,31 @@ class AuthService:
                 detail="Token inválido o expirado"
             )
 
-    def crear_usuario(self, db: Session, username: str, email: str, nombre_completo: str, password_plano: str, rol: str):
+    def crear_usuario(self, db: Session, username: str, email: str, nombre: str, password_plano: str, rol: str):
         """
-        Crea un usuario nuevo con contraseña en bcrypt.
-        Solo debería usarse desde un endpoint protegido por rol "admin".
+        Crea un nuevo usuario en la base de datos.
         """
-        existente = db.execute(
-            text("""
-                SELECT TOP 1 id FROM dbo.usuarios
-                WHERE username = :u OR email = :e
-            """),
-            {"u": username, "e": email}
-        ).first()
-
-        if existente:
-            raise HTTPException(
-                status_code=400,
-                detail="El usuario o correo ya existe"
-            )
-
+        # Hashear la contraseña
         password_hash = bcrypt.hash(password_plano)
-
+        
+        # Insertar usuario con nombre
         result = db.execute(
             text("""
-                INSERT INTO dbo.usuarios
-                (username, email, nombre_completo, password_hash, rol, is_active)
-                OUTPUT INSERTED.*
-                VALUES (:username, :email, :nombre_completo, :password_hash, :rol, 1)
+                INSERT INTO dbo.usuarios (username, email, nombre, password_hash, rol, is_active)
+                OUTPUT INSERTED.id, INSERTED.username, INSERTED.email, INSERTED.nombre, INSERTED.rol, INSERTED.is_active
+                VALUES (:username, :email, :nombre, :password_hash, :rol, 1)
             """),
             {
                 "username": username,
                 "email": email,
-                "nombre_completo": nombre_completo,
+                "nombre": nombre,
                 "password_hash": password_hash,
                 "rol": rol
             }
         ).mappings().first()
-
+        
         db.commit()
-
-        # Devuelve el resultado como un diccionario (incluyendo todos los campos de INSERTED.*)
-        return dict(result) if result else None
+        return dict(result)
 
     def reset_password(self, db: Session, user_id: int, nueva_clave: str):
         """
@@ -219,6 +203,4 @@ class AuthService:
 
 
 auth_service = AuthService()
-"""Configuración de la aplicaciónción centralizada del sistema
-Incluye: Base de datos, Tesseract OCR, Azure AD, OneDrive
-""" 
+
