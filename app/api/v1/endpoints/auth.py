@@ -14,6 +14,11 @@ class PasswordResetRequest(BaseModel):
     user_id: int
     new_password: str
 
+class UserUpdateRequest(BaseModel):
+    username: str
+    email: str
+    rol: str
+
 # Esto le dice a FastAPI/Swagger que el token va en Authorization: Bearer <token>
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -180,6 +185,42 @@ def listar_usuarios_todos(db: Session = Depends(get_db)):
     return {"ok": True, "items": [dict(r) for r in rows]}
 
 
+@router.put("/usuarios/{user_id}", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
+def editar_usuario(user_id: int, request: UserUpdateRequest, db: Session = Depends(get_db)):
+    """
+    Actualiza los datos de un usuario (username, email, rol).
+    No actualiza la contraseña (usar endpoint específico).
+    """
+    try:
+        row = db.execute(
+            text("""
+                EXEC dbo.sp_Usuarios_CRUD
+                    @accion = :accion,
+                    @id = :id,
+                    @username = :username,
+                    @email = :email,
+                    @rol = :rol
+            """),
+            {
+                "accion": "UPDATE",
+                "id": user_id,
+                "username": request.username,
+                "email": request.email,
+                "rol": request.rol
+            }
+        ).mappings().first()
+        
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al actualizar usuario: {str(e)}")
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    return {"ok": True, "user": dict(row)}
+
+
 @router.delete("/usuarios/{user_id}", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
 def desactivar_usuario(user_id: int, db: Session = Depends(get_db)):
     """
@@ -197,6 +238,7 @@ def desactivar_usuario(user_id: int, db: Session = Depends(get_db)):
         
         db.commit()
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al desactivar usuario: {str(e)}")
 
     if not row:
