@@ -1,11 +1,18 @@
+from email.mime import text
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.auth_service import auth_service
 
 router = APIRouter()
+
+class PasswordResetRequest(BaseModel):
+    user_id: int
+    new_password: str
 
 # Esto le dice a FastAPI/Swagger que el token va en Authorization: Bearer <token>
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -140,3 +147,87 @@ def reset_password(body: dict, db: Session = Depends(get_db)):
         "ok": True,
         "user": actualizado
     }
+
+@router.get("/usuarios", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
+def listar_usuarios_activos(db: Session = Depends(get_db)):
+    """
+    Lista solo usuarios activos usando el SP unificado.
+    """
+    try:
+        rows = db.execute(
+            text("EXEC dbo.sp_Usuarios_CRUD @accion = :accion"),
+            {"accion": "LIST"}
+        ).mappings().all()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al listar usuarios: {str(e)}")
+
+    return {"ok": True, "items": [dict(r) for r in rows]}
+
+
+@router.get("/usuarios/todos", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
+def listar_usuarios_todos(db: Session = Depends(get_db)):
+    """
+    Lista todos los usuarios (activos e inactivos).
+    """
+    try:
+        rows = db.execute(
+            text("EXEC dbo.sp_Usuarios_CRUD @accion = :accion"),
+            {"accion": "LIST_ALL"}
+        ).mappings().all()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al listar usuarios (todos): {str(e)}")
+
+    return {"ok": True, "items": [dict(r) for r in rows]}
+
+
+@router.delete("/usuarios/{user_id}", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
+def desactivar_usuario(user_id: int, db: Session = Depends(get_db)):
+    """
+    Borrado lógico (is_active = 0) usando el SP unificado.
+    """
+    try:
+        row = db.execute(
+            text("""
+                EXEC dbo.sp_Usuarios_CRUD
+                    @accion = :accion,
+                    @id = :id
+            """),
+            {"accion": "DISABLE", "id": user_id}
+        ).mappings().first()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al desactivar usuario: {str(e)}")
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    return {"ok": True, "user": dict(row)}
+
+@router.post("/usuarios/reset-password", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
+def resetear_password(request: PasswordResetRequest, db: Session = Depends(get_db)):
+    """
+    Cambia la contraseña de un usuario existente.
+    - Requiere rol admin.
+    - Encripta con bcrypt antes de guardar.
+    - Usa el SP unificado sp_Usuarios_CRUD (@accion='UPDATE_PASSWORD').
+    """
+    try:
+        nuevo_hash = bcrypt.hash(request.new_password)
+
+        row = db.execute(
+            text("""
+                EXEC dbo.sp_Usuarios_CRUD
+                    @accion = :accion,
+                    @id = :id,
+                    @password_hash = :ph
+            """),
+            {"accion": "UPDATE_PASSWORD", "id": request.user_id, "ph": nuevo_hash}
+        ).mappings().first()
+
+        db.commit()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        return {"ok": True, "user": dict(row)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al cambiar la contraseña: {str(e)}")
