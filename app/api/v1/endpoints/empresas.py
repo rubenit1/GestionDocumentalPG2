@@ -5,6 +5,7 @@ from typing import List, Optional
 from app.db.session import get_db
 from app.models.empresa import EmpresaBase, EmpresaDetalles, EmpresaCreate, EmpresaUpdate
 from app.models.representante import RepresentanteBase
+from app.models.empresa import EmpresaPublic
 from app.models.empresa_representante import EmpresaRepresentanteCreate
 from app.repository.empresa_representante import EmpresaRepresentanteRepository
 from app.services.empresa import EmpresaService
@@ -14,7 +15,7 @@ router = APIRouter()
 empresa_service = EmpresaService() 
 empresa_rep_repo = EmpresaRepresentanteRepository()
 
-@router.get("/", response_model=List[EmpresaBase])
+@router.get("/", response_model=List[EmpresaPublic])
 def get_all_empresas(
     db: Session = Depends(get_db), 
     proyecto_id: Optional[int] = None
