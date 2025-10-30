@@ -1,31 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import text 
-from passlib.hash import bcrypt
+from typing import List # Para la respuesta de lista
 
 from app.db.session import get_db
+# Importar el servicio refactorizado
 from app.services.auth_service import auth_service
+# Importar los nuevos modelos Pydantic
+from app.models.usuario import (
+    UserCreateRequest,
+    UserUpdateRequest,
+    PasswordResetRequest,
+    UserPublic,
+    TokenData,
+    LoginResponse
+)
 
 router = APIRouter()
-
-class PasswordResetRequest(BaseModel):
-    user_id: int
-    new_password: str
-
-class UserUpdateRequest(BaseModel):
-    username: str
-    email: str
-    nombre: str  # ← Cambiar a "nombre"
-    rol: str
 
 # Esto le dice a FastAPI/Swagger que el token va en Authorization: Bearer <token>
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 # ========= LOGIN =========
-@router.post("/login")
-def login(body: dict, db: Session = Depends(get_db)):
+@router.post("/login", response_model=LoginResponse)
+def login(body: dict = Body(...), db: Session = Depends(get_db)):
     """
     Body esperado:
     {
@@ -37,292 +36,104 @@ def login(body: dict, db: Session = Depends(get_db)):
     password = body.get("password")
 
     if not login_val or not password:
-        raise HTTPException(
-            status_code=400,
-            detail="Faltan credenciales"
-        )
+        raise HTTPException(status_code=400, detail="Faltan credenciales")
 
-    data = auth_service.login(db, login_val, password)
+    token, user_public = auth_service.login(db, login_val, password)
 
-    return {
-        "ok": True,
-        **data  # token + user
-    }
-
-# ========= QUIÉN SOY =========
-@router.get("/me")
-def me(token: str = Depends(oauth2_scheme)):
-    """
-    Devuelve info del usuario autenticado a partir del JWT.
-    Sirve para que el frontend reconstruya sesión.
-    """
-    user = auth_service.decode_token(token)
-    return {
-        "ok": True,
-        "user": user
-    }
+    return LoginResponse(ok=True, token=token, user=user_public)
 
 # ========= DEPENDENCIAS REUSABLES =========
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    """
-    Úsalo en cualquier endpoint que quieras proteger con login.
-    Ejemplo:
-        dependencies=[Depends(get_current_user)]
-    """
+def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenData:
+    """Úsalo en cualquier endpoint que quieras proteger con login."""
     return auth_service.decode_token(token)
 
 def require_roles(roles_permitidos: list[str]):
-    """
-    Úsalo en endpoints que quieras restringir por rol ("admin", "legal", etc.).
-    Ejemplo:
-        dependencies=[Depends(require_roles(["admin"]))]
-    """
-    def checker(user = Depends(get_current_user)):
-        if user["rol"] not in roles_permitidos:
-            raise HTTPException(
-                status_code=403,
-                detail="Sin permiso"
-            )
+    """Restringe endpoints por rol ("admin", "legal", etc.)."""
+    def checker(user: TokenData = Depends(get_current_user)):
+        if user.rol not in roles_permitidos:
+            raise HTTPException(status_code=403, detail="Sin permiso")
         return user
     return checker
+
+# ========= QUIÉN SOY (Protegido) =========
+@router.get("/me")
+def me(current_user: TokenData = Depends(get_current_user)): # <--- CORREGIDO
+    """
+    Devuelve info del usuario autenticado a partir del JWT.
+    (La dependencia get_current_user ya hace la validación)
+    """
+    return {"ok": True, "user": current_user}
+
 
 # ========= ADMIN: CREAR USUARIO NUEVO =========
 @router.post(
     "/crear-usuario",
+    response_model=UserPublic,
     dependencies=[Depends(require_roles(["admin"]))],
 )
-def crear_usuario(body: dict, db: Session = Depends(get_db)):
+def crear_usuario(user_data: UserCreateRequest, db: Session = Depends(get_db)):
     """
-    Body esperado:
-    {
-        "username": "nuevoUser",
-        "email": "nuevo@empresa.com",
-        "nombre": "Juan Pérez",
-        "password": "ClaveTemporalInicial!",
-        "rol": "legal"   # o "admin", etc.
-    }
+    Crea un nuevo usuario.
+    El body debe coincidir con el modelo UserCreateRequest.
     """
-    username = body.get("username")
-    email = body.get("email")
-    nombre = body.get("nombre")  # ← Cambiar a "nombre"
-    password_plano = body.get("password")
-    rol = body.get("rol")
+    # La lógica de hashear y llamar al SP está en el servicio
+    nuevo_usuario = auth_service.crear_usuario(db, user_data)
+    
+    # El servicio ya devuelve el modelo público traducido
+    return nuevo_usuario
 
-    if not username or not email or not nombre or not password_plano or not rol:
-        raise HTTPException(
-            status_code=400,
-            detail="Faltan campos obligatorios"
-        )
+# ========= ADMIN: LISTAR USUARIOS ACTIVOS =========
+@router.get(
+    "/usuarios",
+    response_model=List[UserPublic],
+    dependencies=[Depends(require_roles(["admin"]))],
+)
+def listar_usuarios_activos(db: Session = Depends(get_db)):
+    """Lista solo usuarios activos."""
+    usuarios = auth_service.listar_usuarios(db, todos=False)
+    return usuarios
 
-    nuevo = auth_service.crear_usuario(
-        db,
-        username=username,
-        email=email,
-        nombre=nombre,  # ← Cambiar a "nombre"
-        password_plano=password_plano,
-        rol=rol
-    )
+# ========= ADMIN: LISTAR TODOS LOS USUARIOS =========
+@router.get(
+    "/usuarios/todos",
+    response_model=List[UserPublic],
+    dependencies=[Depends(require_roles(["admin"]))],
+)
+def listar_usuarios_todos(db: Session = Depends(get_db)):
+    """Lista todos los usuarios (activos e inactivos)."""
+    usuarios = auth_service.listar_usuarios(db, todos=True)
+    return usuarios
 
-    return {
-        "ok": True,
-        "user": nuevo
-    }
+# ========= ADMIN: EDITAR USUARIO =========
+@router.put(
+    "/usuarios/{user_id}",
+    response_model=UserPublic,
+    dependencies=[Depends(require_roles(["admin"]))],
+)
+def editar_usuario(user_id: int, user_data: UserUpdateRequest, db: Session = Depends(get_db)):
+    """Actualiza los datos de un usuario (username, email, nombre, rol)."""
+    usuario_actualizado = auth_service.editar_usuario(db, user_id, user_data)
+    return usuario_actualizado
+
+# ========= ADMIN: DESACTIVAR USUARIO =========
+@router.delete(
+    "/usuarios/{user_id}",
+    response_model=UserPublic,
+    dependencies=[Depends(require_roles(["admin"]))],
+)
+def desactivar_usuario(user_id: int, db: Session = Depends(get_db)):
+    """Borrado lógico (is_active = 0) de un usuario."""
+    usuario_desactivado = auth_service.desactivar_usuario(db, user_id)
+    return usuario_desactivado
 
 # ========= ADMIN: RESET PASSWORD =========
 @router.post(
-    "/reset-password",
+    "/usuarios/reset-password",
+    response_model=UserPublic,
     dependencies=[Depends(require_roles(["admin"]))],
 )
-def reset_password(body: dict, db: Session = Depends(get_db)):
-    """
-    Body esperado:
-    {
-        "user_id": 1,
-        "new_password": "MiClaveFinalSegura2025!"
-    }
-    """
-    user_id = body.get("user_id")
-    nueva = body.get("new_password")
-
-    if not user_id or not nueva:
-        raise HTTPException(
-            status_code=400,
-            detail="Faltan campos"
-        )
-
-    actualizado = auth_service.reset_password(db, user_id, nueva)
-
-    return {
-        "ok": True,
-        "user": actualizado
-    }
-
-@router.get("/usuarios", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
-def listar_usuarios_activos(db: Session = Depends(get_db)):
-    """
-    Lista solo usuarios activos usando el SP unificado.
-    """
-    try:
-        rows = db.execute(
-            text("EXEC dbo.sp_Usuarios_CRUD @accion = :accion"),
-            {"accion": "LIST"}
-        ).mappings().all()
-        
-        # ----- INICIO DE LA CORRECCIÓN -----
-        # Traducir 'nombre_completo' a 'nombre' para el frontend
-        items_traducidos = []
-        for r in rows:
-            item = dict(r)
-            if 'nombre_completo' in item:
-                item['nombre'] = item.pop('nombre_completo')
-            items_traducidos.append(item)
-        # ----- FIN DE LA CORRECCIÓN -----
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al listar usuarios: {str(e)}")
-
-    return {"ok": True, "items": items_traducidos} # <-- Se usa la lista traducida
-
-
-@router.get("/usuarios/todos", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
-def listar_usuarios_todos(db: Session = Depends(get_db)):
-    """
-    Lista todos los usuarios (activos e inactivos).
-    """
-    try:
-        rows = db.execute(
-            text("EXEC dbo.sp_Usuarios_CRUD @accion = :accion"),
-            {"accion": "LIST_ALL"}
-        ).mappings().all()
-        
-        # ----- INICIO DE LA CORRECCIÓN -----
-        # Traducir 'nombre_completo' a 'nombre' para el frontend
-        items_traducidos = []
-        for r in rows:
-            item = dict(r)
-            if 'nombre_completo' in item:
-                item['nombre'] = item.pop('nombre_completo')
-            items_traducidos.append(item)
-        # ----- FIN DE LA CORRECCIÓN -----
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al listar usuarios (todos): {str(e)}")
-
-    return {"ok": True, "items": items_traducidos} # <-- Se usa la lista traducida
-
-
-@router.put("/usuarios/{user_id}", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
-def editar_usuario(user_id: int, request: UserUpdateRequest, db: Session = Depends(get_db)):
-    """
-    Actualiza los datos de un usuario (username, email, nombre, rol).
-    No actualiza la contraseña (usar endpoint específico).
-    """
-    try:
-        row = db.execute(
-            text("""
-                EXEC dbo.sp_Usuarios_CRUD
-                    @accion = :accion,
-                    @id = :id,
-                    @username = :username,
-                    @email = :email,
-                    @nombre = :nombre,
-                    @rol = :rol
-            """),
-            {
-                "accion": "UPDATE",
-                "id": user_id,
-                "username": request.username,
-                "email": request.email,
-                "nombre": request.nombre,  # ← El SP ya acepta "nombre" como parámetro
-                "rol": request.rol
-            }
-        ).mappings().first()
-        
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error al actualizar usuario: {str(e)}")
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-
-    # ----- CORRECCIÓN ADICIONAL -----
-    # Traducir la respuesta del UPDATE también
-    user_dict = dict(row)
-    if 'nombre_completo' in user_dict:
-        user_dict['nombre'] = user_dict.pop('nombre_completo')
-    # --------------------------------
-
-    return {"ok": True, "user": user_dict}
-
-
-@router.delete("/usuarios/{user_id}", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
-def desactivar_usuario(user_id: int, db: Session = Depends(get_db)):
-    """
-    Borrado lógico (is_active = 0) usando el SP unificado.
-    """
-    try:
-        row = db.execute(
-            text("""
-                EXEC dbo.sp_Usuarios_CRUD
-                    @accion = :accion,
-                    @id = :id
-            """),
-            {"accion": "DISABLE", "id": user_id}
-        ).mappings().first()
-        
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error al desactivar usuario: {str(e)}")
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
-    # ----- CORRECCIÓN ADICIONAL -----
-    # Traducir la respuesta del DISABLE
-    user_dict = dict(row)
-    if 'nombre_completo' in user_dict:
-        user_dict['nombre'] = user_dict.pop('nombre_completo')
-    # --------------------------------
-
-    return {"ok": True, "user": user_dict}
-
-@router.post("/usuarios/reset-password", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
 def resetear_password(request: PasswordResetRequest, db: Session = Depends(get_db)):
-    """
-    Cambia la contraseña de un usuario existente.
-    - Requiere rol admin.
-    - Encripta con bcrypt antes de guardar.
-    - Usa el SP unificado sp_Usuarios_CRUD (@accion='UPDATE_PASSWORD').
-    """
-    try:
-        # Hashear la nueva contraseña con passlib
-        nuevo_hash = bcrypt.hash(request.new_password)
+    """Cambia la contraseña de un usuario existente."""
+    usuario_actualizado = auth_service.reset_password(db, request)
+    return usuario_actualizado
 
-        row = db.execute(
-            text("""
-                EXEC dbo.sp_Usuarios_CRUD
-                    @accion = :accion,
-                    @id = :id,
-                    @password_hash = :ph
-            """),
-            {"accion": "UPDATE_PASSWORD", "id": request.user_id, "ph": nuevo_hash}
-        ).mappings().first()
-
-        db.commit()
-
-        if not row:
-            raise HTTPException(status_code=44, detail="Usuario no encontrado")
-
-        # ----- CORRECCIÓN ADICIONAL -----
-        # Traducir la respuesta del UPDATE_PASSWORD
-        user_dict = dict(row)
-        if 'nombre_completo' in user_dict:
-            user_dict['nombre'] = user_dict.pop('nombre_completo')
-        # --------------------------------
-
-        return {"ok": True, "user": user_dict}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error al cambiar la contraseña: {str(e)}")

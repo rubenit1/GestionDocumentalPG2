@@ -1,55 +1,68 @@
-# app/models/documento_onedrive.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import Optional
 from datetime import datetime
 
-class DocumentoCreate(BaseModel):
-    nombre_archivo: str
-    tipo_documento: str  # contrato, minuta, anexo, carta
-    estado: str = "borrador"
-    empresa_id: Optional[int] = None
-    representante_id: Optional[int] = None
-    plantilla_id: Optional[int] = None
-    persona_id: Optional[int] = None
-    categoria: Optional[str] = None
-    notas: Optional[str] = None
-    tags: Optional[str] = None  # JSON string
+# --- Modelos para el Frontend (lo que se envía/recibe) ---
 
-class DocumentoBase(BaseModel):
+class UserCreateRequest(BaseModel):
+    """Modelo para crear un usuario (lo que envía el frontend)"""
+    username: str
+    email: EmailStr
+    nombre: str  # El frontend envía 'nombre'
+    password: str = Field(min_length=8)
+    rol: str
+
+class UserUpdateRequest(BaseModel):
+    """Modelo para actualizar un usuario (lo que envía el frontend)"""
+    username: str
+    email: EmailStr
+    nombre: str  # El frontend envía 'nombre'
+    rol: str
+
+class PasswordResetRequest(BaseModel):
+    """Modelo para resetear password (lo que envía el frontend)"""
+    user_id: int
+    new_password: str = Field(min_length=8)
+
+
+# --- Modelos para la Base de Datos (representación interna) ---
+
+class UserInDB(BaseModel):
+    """Modelo que representa al usuario como está en la BD"""
     id: int
-    onedrive_file_id: str
-    nombre_archivo: str
-    tipo_documento: str
-    estado: str
+    username: str
+    email: EmailStr
+    nombre_completo: str # La BD usa 'nombre_completo'
+    rol: str
+    is_active: bool
     fecha_creacion: datetime
-    onedrive_web_url: Optional[str] = None
 
-class DocumentoDetalle(DocumentoBase):
-    onedrive_path: str
-    hash_sha256: str
-    tamano_bytes: Optional[int] = None
-    version: int
-    empresa_id: Optional[int] = None
-    representante_id: Optional[int] = None
-    usuario_creador_id: int
-    fecha_modificacion: Optional[datetime] = None
-    notas: Optional[str] = None
-    tags: Optional[str] = None
-    categoria: Optional[str] = None
+    class Config:
+        from_attributes = True # Permite mapear desde objetos SQL
+        # Reemplazado por .from_orm() en Pydantic v2
+        # Para Pydantic v2, se usaría from_attributes = True
 
-class DocumentoUpdate(BaseModel):
-    nombre_archivo: Optional[str] = None
-    estado: Optional[str] = None
-    empresa_id: Optional[int] = None
-    representante_id: Optional[int] = None
-    notas: Optional[str] = None
 
-class HistorialDocumento(BaseModel):
+# --- Modelos de Respuesta (lo que la API devuelve al frontend) ---
+
+class UserPublic(BaseModel):
+    """Modelo de usuario seguro para devolver al frontend"""
     id: int
-    accion: str
-    campo_modificado: Optional[str] = None
-    valor_anterior: Optional[str] = None
-    valor_nuevo: Optional[str] = None
-    fecha_accion: datetime
-    usuario_nombre: str
-    notas: Optional[str] = None
+    username: str
+    email: EmailStr
+    nombre: str # El frontend recibe 'nombre'
+    rol: str
+    is_active: bool
+    fecha_creacion: Optional[datetime] = None
+
+class TokenData(BaseModel):
+    """Modelo para los datos dentro del JWT"""
+    id: int
+    username: str
+    rol: str
+
+class LoginResponse(BaseModel):
+    """Modelo para la respuesta de /login"""
+    ok: bool
+    token: str
+    user: UserPublic
