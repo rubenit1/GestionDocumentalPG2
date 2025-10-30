@@ -1,10 +1,9 @@
-from email.mime import text
-import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text 
+from passlib.hash import bcrypt
 
 from app.db.session import get_db
 from app.services.auth_service import auth_service
@@ -195,6 +194,8 @@ def desactivar_usuario(user_id: int, db: Session = Depends(get_db)):
             """),
             {"accion": "DISABLE", "id": user_id}
         ).mappings().first()
+        
+        db.commit()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al desactivar usuario: {str(e)}")
 
@@ -212,6 +213,7 @@ def resetear_password(request: PasswordResetRequest, db: Session = Depends(get_d
     - Usa el SP unificado sp_Usuarios_CRUD (@accion='UPDATE_PASSWORD').
     """
     try:
+        # Hashear la nueva contraseña con passlib
         nuevo_hash = bcrypt.hash(request.new_password)
 
         row = db.execute(
@@ -231,4 +233,5 @@ def resetear_password(request: PasswordResetRequest, db: Session = Depends(get_d
 
         return {"ok": True, "user": dict(row)}
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al cambiar la contraseña: {str(e)}")
