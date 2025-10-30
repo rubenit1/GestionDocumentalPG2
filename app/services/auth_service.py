@@ -141,7 +141,7 @@ class AuthService:
                 detail="Token inválido o expirado"
             )
 
-    def crear_usuario(self, db: Session, username: str, email: str, password_plano: str, rol: str):
+    def crear_usuario(self, db: Session, username: str, email: str, nombre_completo: str, password_plano: str, rol: str):
         """
         Crea un usuario nuevo con contraseña en bcrypt.
         Solo debería usarse desde un endpoint protegido por rol "admin".
@@ -160,31 +160,28 @@ class AuthService:
                 detail="El usuario o correo ya existe"
             )
 
-        hashed = bcrypt.hash(password_plano)
+        password_hash = bcrypt.hash(password_plano)
 
         result = db.execute(
             text("""
-                INSERT INTO dbo.usuarios (username, email, password_hash, rol, is_active)
-                OUTPUT INSERTED.id, INSERTED.username, INSERTED.email, INSERTED.rol, INSERTED.is_active
-                VALUES (:u, :e, :p, :r, 1)
+                INSERT INTO dbo.usuarios
+                (username, email, nombre_completo, password_hash, rol, is_active)
+                OUTPUT INSERTED.*
+                VALUES (:username, :email, :nombre_completo, :password_hash, :rol, 1)
             """),
             {
-                "u": username,
-                "e": email,
-                "p": hashed,
-                "r": rol
+                "username": username,
+                "email": email,
+                "nombre_completo": nombre_completo,
+                "password_hash": password_hash,
+                "rol": rol
             }
         ).mappings().first()
 
         db.commit()
 
-        return {
-            "id": result["id"],
-            "username": result["username"],
-            "email": result["email"],
-            "rol": result["rol"],
-            "is_active": result["is_active"],
-        }
+        # Devuelve el resultado como un diccionario (incluyendo todos los campos de INSERTED.*)
+        return dict(result) if result else None
 
     def reset_password(self, db: Session, user_id: int, nueva_clave: str):
         """
@@ -222,3 +219,6 @@ class AuthService:
 
 
 auth_service = AuthService()
+"""Configuración de la aplicaciónción centralizada del sistema
+Incluye: Base de datos, Tesseract OCR, Azure AD, OneDrive
+""" 

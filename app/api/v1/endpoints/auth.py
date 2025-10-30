@@ -17,6 +17,7 @@ class PasswordResetRequest(BaseModel):
 class UserUpdateRequest(BaseModel):
     username: str
     email: str
+    nombre_completo: str
     rol: str
 
 # Esto le dice a FastAPI/Swagger que el token va en Authorization: Bearer <token>
@@ -96,16 +97,18 @@ def crear_usuario(body: dict, db: Session = Depends(get_db)):
     {
         "username": "nuevoUser",
         "email": "nuevo@empresa.com",
+        "nombre_completo": "Juan Pérez",
         "password": "ClaveTemporalInicial!",
         "rol": "legal"   # o "admin", etc.
     }
     """
     username = body.get("username")
     email = body.get("email")
+    nombre_completo = body.get("nombre_completo")
     password_plano = body.get("password")
     rol = body.get("rol")
 
-    if not username or not email or not password_plano or not rol:
+    if not username or not email or not nombre_completo or not password_plano or not rol:
         raise HTTPException(
             status_code=400,
             detail="Faltan campos obligatorios"
@@ -115,6 +118,7 @@ def crear_usuario(body: dict, db: Session = Depends(get_db)):
         db,
         username=username,
         email=email,
+        nombre_completo=nombre_completo,
         password_plano=password_plano,
         rol=rol
     )
@@ -188,7 +192,7 @@ def listar_usuarios_todos(db: Session = Depends(get_db)):
 @router.put("/usuarios/{user_id}", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
 def editar_usuario(user_id: int, request: UserUpdateRequest, db: Session = Depends(get_db)):
     """
-    Actualiza los datos de un usuario (username, email, rol).
+    Actualiza los datos de un usuario (username, email, nombre_completo, rol).
     No actualiza la contraseña (usar endpoint específico).
     """
     try:
@@ -199,6 +203,7 @@ def editar_usuario(user_id: int, request: UserUpdateRequest, db: Session = Depen
                     @id = :id,
                     @username = :username,
                     @email = :email,
+                    @nombre_completo = :nombre_completo,
                     @rol = :rol
             """),
             {
@@ -206,6 +211,7 @@ def editar_usuario(user_id: int, request: UserUpdateRequest, db: Session = Depen
                 "id": user_id,
                 "username": request.username,
                 "email": request.email,
+                "nombre_completo": request.nombre_completo,
                 "rol": request.rol
             }
         ).mappings().first()
