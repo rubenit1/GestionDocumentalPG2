@@ -167,10 +167,21 @@ def listar_usuarios_activos(db: Session = Depends(get_db)):
             text("EXEC dbo.sp_Usuarios_CRUD @accion = :accion"),
             {"accion": "LIST"}
         ).mappings().all()
+        
+        # ----- INICIO DE LA CORRECCIÓN -----
+        # Traducir 'nombre_completo' a 'nombre' para el frontend
+        items_traducidos = []
+        for r in rows:
+            item = dict(r)
+            if 'nombre_completo' in item:
+                item['nombre'] = item.pop('nombre_completo')
+            items_traducidos.append(item)
+        # ----- FIN DE LA CORRECCIÓN -----
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al listar usuarios: {str(e)}")
 
-    return {"ok": True, "items": [dict(r) for r in rows]}
+    return {"ok": True, "items": items_traducidos} # <-- Se usa la lista traducida
 
 
 @router.get("/usuarios/todos", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
@@ -183,10 +194,21 @@ def listar_usuarios_todos(db: Session = Depends(get_db)):
             text("EXEC dbo.sp_Usuarios_CRUD @accion = :accion"),
             {"accion": "LIST_ALL"}
         ).mappings().all()
+        
+        # ----- INICIO DE LA CORRECCIÓN -----
+        # Traducir 'nombre_completo' a 'nombre' para el frontend
+        items_traducidos = []
+        for r in rows:
+            item = dict(r)
+            if 'nombre_completo' in item:
+                item['nombre'] = item.pop('nombre_completo')
+            items_traducidos.append(item)
+        # ----- FIN DE LA CORRECCIÓN -----
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al listar usuarios (todos): {str(e)}")
 
-    return {"ok": True, "items": [dict(r) for r in rows]}
+    return {"ok": True, "items": items_traducidos} # <-- Se usa la lista traducida
 
 
 @router.put("/usuarios/{user_id}", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
@@ -211,7 +233,7 @@ def editar_usuario(user_id: int, request: UserUpdateRequest, db: Session = Depen
                 "id": user_id,
                 "username": request.username,
                 "email": request.email,
-                "nombre": request.nombre,  # ← Cambiar a "nombre"
+                "nombre": request.nombre,  # ← El SP ya acepta "nombre" como parámetro
                 "rol": request.rol
             }
         ).mappings().first()
@@ -224,7 +246,14 @@ def editar_usuario(user_id: int, request: UserUpdateRequest, db: Session = Depen
     if not row:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-    return {"ok": True, "user": dict(row)}
+    # ----- CORRECCIÓN ADICIONAL -----
+    # Traducir la respuesta del UPDATE también
+    user_dict = dict(row)
+    if 'nombre_completo' in user_dict:
+        user_dict['nombre'] = user_dict.pop('nombre_completo')
+    # --------------------------------
+
+    return {"ok": True, "user": user_dict}
 
 
 @router.delete("/usuarios/{user_id}", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
@@ -249,8 +278,15 @@ def desactivar_usuario(user_id: int, db: Session = Depends(get_db)):
 
     if not row:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # ----- CORRECCIÓN ADICIONAL -----
+    # Traducir la respuesta del DISABLE
+    user_dict = dict(row)
+    if 'nombre_completo' in user_dict:
+        user_dict['nombre'] = user_dict.pop('nombre_completo')
+    # --------------------------------
 
-    return {"ok": True, "user": dict(row)}
+    return {"ok": True, "user": user_dict}
 
 @router.post("/usuarios/reset-password", dependencies=[Depends(require_roles(["admin"]))], tags=["Auth"])
 def resetear_password(request: PasswordResetRequest, db: Session = Depends(get_db)):
@@ -277,9 +313,16 @@ def resetear_password(request: PasswordResetRequest, db: Session = Depends(get_d
         db.commit()
 
         if not row:
-            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+            raise HTTPException(status_code=44, detail="Usuario no encontrado")
 
-        return {"ok": True, "user": dict(row)}
+        # ----- CORRECCIÓN ADICIONAL -----
+        # Traducir la respuesta del UPDATE_PASSWORD
+        user_dict = dict(row)
+        if 'nombre_completo' in user_dict:
+            user_dict['nombre'] = user_dict.pop('nombre_completo')
+        # --------------------------------
+
+        return {"ok": True, "user": user_dict}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al cambiar la contraseña: {str(e)}")
