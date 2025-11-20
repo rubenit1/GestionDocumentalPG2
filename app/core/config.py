@@ -41,7 +41,7 @@ JWT_EXPIRES_MINUTES = int(os.getenv("JWT_EXPIRES_MINUTES", "480"))
 
 # Validación de configuración de Azure
 if not all([AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, ONEDRIVE_USER_ID]):
-    print("⚠️ ADVERTENCIA: Variables de Azure/OneDrive no configuradas")
+    print(" ADVERTENCIA: Variables de Azure/OneDrive no configuradas")
     print("   Los endpoints de OneDrive no funcionarán correctamente")
     print("   Configura .env con las credenciales de Azure AD")
 

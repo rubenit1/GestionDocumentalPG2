@@ -130,7 +130,6 @@ class ServicioDocumentoV2:
                 'profesion': colaborador.profesion or 'N/A',
                 'posicion': colaborador.posicion or contrato.tipo_contrato or '',
                 'lugar_notificaciones': colaborador.direccion or '',
-                # --- CORRECCIÓN AQUÍ ---
                 'puesto': colaborador.posicion or contrato.tipo_contrato or '',
             },
             
@@ -203,19 +202,51 @@ class ServicioDocumentoV2:
             return fecha_str
 
     def _procesar_fecha(self, fecha_str):
+        """
+        Procesa fecha en formato dd/mm/yyyy o yyyy-mm-dd
+        """
         meses_esp = {
             1: 'enero', 2: 'febrero', 3: 'marzo', 4: 'abril',
             5: 'mayo', 6: 'junio', 7: 'julio', 8: 'agosto',
             9: 'septiembre', 10: 'octubre', 11: 'noviembre', 12: 'diciembre'
         }
-        if not fecha_str or "indefinido" in fecha_str.lower():
-            return {'dia': 'N/A', 'dia_letras': 'N/A', 'mes': 'N/A', 'anio': 'N/A', 'anio_letras': 'N/A', 'completa': 'Por tiempo indefinido'}
+        
+        if not fecha_str or "indefinido" in str(fecha_str).lower():
+            return {
+                'dia': 'N/A', 
+                'dia_letras': 'N/A', 
+                'mes': 'N/A', 
+                'anio': 'N/A', 
+                'anio_letras': 'N/A', 
+                'completa': 'Por tiempo indefinido'
+            }
+        
         try:
-            fecha = datetime.datetime.strptime(fecha_str, "%Y-%m-%d")
+            # Intentar formato dd/mm/yyyy primero (del OCR)
+            if '/' in fecha_str:
+                fecha = datetime.datetime.strptime(fecha_str, "%d/%m/%Y")
+            else:
+                # Formato yyyy-mm-dd
+                fecha = datetime.datetime.strptime(fecha_str, "%Y-%m-%d")
+            
             mes_nombre = meses_esp[fecha.month]
-            return {'dia': fecha.day, 'dia_letras': num2words(fecha.day, lang='es'), 'mes': mes_nombre, 'anio': fecha.year, 'anio_letras': num2words(fecha.year, lang='es'), 'completa': f"{fecha.day} de {mes_nombre} de {fecha.year}"}
-        except (ValueError, TypeError):
-            return {'dia': 'N/A', 'dia_letras': 'N/A', 'mes': 'N/A', 'anio': 'N/A', 'anio_letras': 'N/A', 'completa': 'Fecha no especificada'}
+            return {
+                'dia': fecha.day, 
+                'dia_letras': num2words(fecha.day, lang='es'), 
+                'mes': mes_nombre, 
+                'anio': fecha.year, 
+                'anio_letras': num2words(fecha.year, lang='es'), 
+                'completa': f"{fecha.day} de {mes_nombre} de {fecha.year}"
+            }
+        except (ValueError, TypeError, AttributeError):
+            return {
+                'dia': 'N/A', 
+                'dia_letras': 'N/A', 
+                'mes': 'N/A', 
+                'anio': 'N/A', 
+                'anio_letras': 'N/A', 
+                'completa': 'Fecha no especificada'
+            }
 
     def _formato_fecha_largo(self, objeto_fecha):
         meses_esp = {
@@ -265,4 +296,3 @@ class ServicioDocumentoV2:
                 return str(numero_str)
         except (ValueError, TypeError):
             return str(numero_str)
-

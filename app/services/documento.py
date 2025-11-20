@@ -62,23 +62,43 @@ class ServicioDocumento:
         colab_profesion = colaborador.profesion or "N/A"
         colab_posicion = colaborador.posicion or solicitud.colaborador_data.datos_contrato.tipo_contrato
 
+        # Fecha de inicio - soporta dd/mm/yyyy y yyyy-mm-dd
         try:
-            fecha_inicio = datetime.datetime.strptime(solicitud.colaborador_data.datos_contrato.fecha_inicio, "%Y-%m-%d")
-            dia_inicio, mes_inicio, anio_inicio = fecha_inicio.day, fecha_inicio.strftime('%B'), fecha_inicio.year
-            dia_inicio_letras, anio_inicio_letras = num2words(dia_inicio, lang='es'), num2words(anio_inicio, lang='es')
-        except (ValueError, TypeError):
-            dia_inicio, mes_inicio, anio_inicio, dia_inicio_letras, anio_inicio_letras = "N/A", "N/A", "N/A", "N/A", "N/A"
+            fecha_inicio_str = solicitud.colaborador_data.datos_contrato.fecha_inicio
+            if '/' in fecha_inicio_str:
+                fecha_inicio = datetime.datetime.strptime(fecha_inicio_str, "%d/%m/%Y")
+            else:
+                fecha_inicio = datetime.datetime.strptime(fecha_inicio_str, "%Y-%m-%d")
+            
+            dia_inicio = fecha_inicio.day
+            mes_inicio = fecha_inicio.strftime('%B')
+            anio_inicio = fecha_inicio.year
+            dia_inicio_letras = num2words(dia_inicio, lang='es')
+            anio_inicio_letras = num2words(anio_inicio, lang='es')
+        except (ValueError, TypeError, AttributeError):
+            dia_inicio, mes_inicio, anio_inicio = "N/A", "N/A", "N/A"
+            dia_inicio_letras, anio_inicio_letras = "N/A", "N/A"
 
+        # Fecha de fin - soporta dd/mm/yyyy y yyyy-mm-dd
         try:
             fecha_fin_str = solicitud.colaborador_data.datos_contrato.fecha_fin
             if fecha_fin_str and "indefinido" not in fecha_fin_str.lower():
-                fecha_fin = datetime.datetime.strptime(fecha_fin_str, "%Y-%m-%d")
-                dia_fin, mes_fin, anio_fin = fecha_fin.day, fecha_fin.strftime('%B'), fecha_fin.year
-                dia_fin_letras, anio_fin_letras = num2words(dia_fin, lang='es'), num2words(anio_fin, lang='es')
+                if '/' in fecha_fin_str:
+                    fecha_fin = datetime.datetime.strptime(fecha_fin_str, "%d/%m/%Y")
+                else:
+                    fecha_fin = datetime.datetime.strptime(fecha_fin_str, "%Y-%m-%d")
+                
+                dia_fin = fecha_fin.day
+                mes_fin = fecha_fin.strftime('%B')
+                anio_fin = fecha_fin.year
+                dia_fin_letras = num2words(dia_fin, lang='es')
+                anio_fin_letras = num2words(anio_fin, lang='es')
             else:
-                dia_fin, mes_fin, anio_fin, dia_fin_letras, anio_fin_letras = "N/A", "N/A", "N/A", "N/A", "N/A"
-        except (ValueError, TypeError):
-            dia_fin, mes_fin, anio_fin, dia_fin_letras, anio_fin_letras = "N/A", "N/A", "N/A", "N/A", "N/A"
+                dia_fin, mes_fin, anio_fin = "N/A", "N/A", "N/A"
+                dia_fin_letras, anio_fin_letras = "N/A", "N/A"
+        except (ValueError, TypeError, AttributeError):
+            dia_fin, mes_fin, anio_fin = "N/A", "N/A", "N/A"
+            dia_fin_letras, anio_fin_letras = "N/A", "N/A"
 
         reemplazos = {
             '{{nombre_completo}}': colaborador.nombre_completo,
@@ -144,4 +164,3 @@ class ServicioDocumento:
         doc.save(nombre_archivo_salida)
         
         return nombre_archivo_salida
-

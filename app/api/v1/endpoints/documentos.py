@@ -22,7 +22,7 @@ async def ocr_extract(file: UploadFile = File(...)):
     """
     Endpoint de OCR con preprocesamiento de imagen.
     """
-    print(f"📄 Procesando imagen: {file.filename}")
+    print(f" Procesando imagen: {file.filename}")
     
     try:
         # Leer la imagen
@@ -47,7 +47,7 @@ async def ocr_extract(file: UploadFile = File(...)):
         extracted_text = pytesseract.image_to_string(image, lang='spa', config=custom_config)
         
         print("\n" + "="*70)
-        print("🔍 TEXTO RAW EXTRAÍDO POR TESSERACT:")
+        print(" TEXTO RAW EXTRAÍDO POR TESSERACT:")
         print("="*70)
         print(extracted_text)
         print("="*70 + "\n")
@@ -59,7 +59,7 @@ async def ocr_extract(file: UploadFile = File(...)):
         return result
         
     except Exception as e:
-        print(f"❌ ERROR EN OCR: {str(e)}")
+        print(f" ERROR EN OCR: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

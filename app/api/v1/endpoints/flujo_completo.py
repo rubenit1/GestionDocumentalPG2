@@ -62,11 +62,11 @@ async def procesar_imagen_y_generar_contrato(
     
     try:
         print("\n" + "="*70)
-        print("🚀 INICIANDO FLUJO COMPLETO")
+        print(" INICIANDO FLUJO COMPLETO")
         print("="*70)
         
         # ===== PASO 1: OCR DE LA IMAGEN =====
-        print("\n📸 PASO 1: Procesando imagen con OCR...")
+        print("\n PASO 1: Procesando imagen con OCR...")
         
         contents = await imagen.read()
         image = Image.open(io.BytesIO(contents))
@@ -81,17 +81,21 @@ async def procesar_imagen_y_generar_contrato(
         image = sharpener.enhance(3.0)
         image = image.filter(ImageFilter.SHARPEN)
         
-        # Extraer texto
-        custom_config = r'--oem 3 --psm 6'
-        extracted_text = pytesseract.image_to_string(image, lang='spa', config=custom_config)
+        # Extraer texto CON MÚLTIPLES PSM (como en documentos_v2.py)
+        text_1 = pytesseract.image_to_string(image, lang='spa', config=r'--oem 3 --psm 6')
+        text_2 = pytesseract.image_to_string(image, lang='spa', config=r'--oem 3 --psm 4')
+        text_3 = pytesseract.image_to_string(image, lang='spa', config=r'--oem 3 --psm 11')
+        
+        extracted_text = max([text_1, text_2, text_3], key=len)
+        print(f"[PSM 6: {len(text_1)}, PSM 4: {len(text_2)}, PSM 11: {len(text_3)} chars]")
         
         # Parsear datos
         datos_ocr = parse_ocr_text(extracted_text)
         
-        print(f"✅ Datos extraídos: {datos_ocr['datos_persona']['nombre_completo']}")
+        print(f" Datos extraídos: {datos_ocr['datos_persona']['nombre_completo']}")
         
         # ===== PASO 2: GUARDAR IMAGEN ORIGINAL EN ONEDRIVE =====
-        print("\n📤 PASO 2: Guardando imagen original en OneDrive...")
+        print("\n PASO 2: Guardando imagen original en OneDrive...")
         
         imagen_filename = f"OCR_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{imagen.filename}"
         imagen_path = f"/Documentos_Legales/Imagenes_Originales/{imagen_filename}"
@@ -102,10 +106,10 @@ async def procesar_imagen_y_generar_contrato(
             file_content=contents
         )
         
-        print(f"✅ Imagen guardada: {resultado_imagen['id']}")
+        print(f"Imagen guardada: {resultado_imagen['id']}")
         
         # ===== PASO 3: GENERAR DOCUMENTO WORD =====
-        print("\n📝 PASO 3: Generando documento Word...")
+        print("\nPASO 3: Generando documento Word...")
         
         # Crear objeto GenerationRequest
         colaborador_data = DocumentoProcesado(**datos_ocr)
@@ -121,10 +125,10 @@ async def procesar_imagen_y_generar_contrato(
         # Generar documento
         archivo_generado = documento_service.generar_documento(db, request)
         
-        print(f"✅ Documento generado: {archivo_generado}")
+        print(f" Documento generado: {archivo_generado}")
         
         # ===== PASO 4: SUBIR DOCUMENTO A ONEDRIVE =====
-        print("\n📤 PASO 4: Subiendo documento a OneDrive...")
+        print("\nPASO 4: Subiendo documento a OneDrive...")
         
         # Leer archivo generado
         with open(archivo_generado, 'rb') as f:
@@ -145,10 +149,10 @@ async def procesar_imagen_y_generar_contrato(
         doc_id = resultado_doc["id"]
         web_url = onedrive_service.obtener_link_compartido(doc_id, tipo="view")
         
-        print(f"✅ Documento subido a OneDrive: {doc_id}")
+        print(f" Documento subido a OneDrive: {doc_id}")
         
         # ===== PASO 5: REGISTRAR EN BASE DE DATOS =====
-        print("\n💾 PASO 5: Registrando en base de datos...")
+        print("\n PASO 5: Registrando en base de datos...")
         
         # Calcular hash
         doc_hash = onedrive_service.calcular_hash(doc_content)
@@ -167,8 +171,8 @@ async def procesar_imagen_y_generar_contrato(
             tamano_bytes=len(doc_content),
             empresa_id=empresa_id,
             representante_id=representante_id,
-            datos_ocr=str(datos_ocr),  # Guardar JSON de datos OCR
-            contenido_indexado=extracted_text,  # Para búsquedas
+            datos_ocr=str(datos_ocr),
+            contenido_indexado=extracted_text,
             categoria=categoria,
             notas=notas
         )
@@ -182,8 +186,9 @@ async def procesar_imagen_y_generar_contrato(
             notas=f"Documento generado automáticamente desde OCR y subido a OneDrive"
         )
         
-        print(f"✅ Registro creado en BD: ID {documento['id']}")
+        print(f" Registro creado en BD: ID {documento['id']}")
         db.commit()
+        
         # ===== LIMPIAR ARCHIVO LOCAL =====
         import os
         try:
@@ -219,7 +224,7 @@ async def procesar_imagen_y_generar_contrato(
         }
         
     except Exception as e:
-        print(f"\n❌ ERROR EN FLUJO COMPLETO: {str(e)}")
+        print(f"\n ERROR EN FLUJO COMPLETO: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error en el flujo: {str(e)}")

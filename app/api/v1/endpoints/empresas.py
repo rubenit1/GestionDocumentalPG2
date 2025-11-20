@@ -124,3 +124,5 @@ def asignar_proyecto_a_empresa(
     except Exception as e:
         db.rollback()
         raise e
+    
+    

@@ -2,13 +2,61 @@
 import re
 from num2words import num2words
 
+def limpiar_fecha_gt(fecha_raw):
+    """
+    Limpia fechas mal formateadas por OCR.
+    Formato guatemalteco: dd/mm/aaaa (día/mes/año)
+    """
+    if not fecha_raw:
+        return fecha_raw
+    
+    fecha = str(fecha_raw).strip()
+    
+    # PRIMERO: Corregir caracteres mal leídos por OCR
+    fecha = fecha.replace('h', '1').replace('H', '1')
+    fecha = fecha.replace('o', '0').replace('O', '0')
+    
+    # Si ya tiene formato correcto dd/mm/aaaa, retornar
+    if re.match(r'^\d{1,2}/\d{1,2}/\d{4}$', fecha):
+        return fecha
+    
+    # Si solo tiene números sin separadores (ej: 13102025)
+    if re.match(r'^\d{8}$', fecha):
+        dia = fecha[:2]
+        mes = fecha[2:4]
+        anio = fecha[4:]
+        return f"{dia}/{mes}/{anio}"
+    
+    # Si tiene formato parcial sin / entre día y mes (ej: 1310/2025 o 120/2026)
+    match = re.match(r'^(\d{3,4})/(\d{4})$', fecha)
+    if match:
+        sin_anio = match.group(1)
+        anio = match.group(2)
+        
+        if len(sin_anio) == 4:  # ej: 1310 -> 13/10
+            dia = sin_anio[:2]
+            mes = sin_anio[2:]
+        elif len(sin_anio) == 3:  # ej: 120 -> 12/10
+            dia = sin_anio[:2]
+            mes = sin_anio[2:]
+            # Si mes es 0, probablemente es 10
+            if mes == '0':
+                mes = '10'
+        else:
+            return fecha
+        
+        return f"{dia}/{mes}/{anio}"
+    
+    return fecha
+
+
 def parse_ocr_text(text: str):
     """
     Parser OCR optimizado para formato de tabla guatemalteco.
-    Versión mejorada para extraer EDAD correctamente de tablas HTML.
+    Versión mejorada con correcciones de caracteres OCR comunes.
     """
     print("\n" + "="*70)
-    print("📄 TEXTO EXTRAÍDO POR OCR:")
+    print(" TEXTO EXTRAÍDO POR OCR:")
     print("="*70)
     print(text)
     print("="*70 + "\n")
@@ -16,22 +64,16 @@ def parse_ocr_text(text: str):
     data = {}
     
     # PRE-PROCESAMIENTO: Limpiar caracteres confusos comunes de OCR
-    # Reemplazar letras que parecen números en contextos numéricos
     text_cleaned = text
     
-    # Correcciones simples sin lookbehind variable
-    # Reemplazar "S7" por "57" cuando aparece después de EDAD
+    # Correcciones para EDAD
     text_cleaned = re.sub(r'EDAD[\s:]*S7', 'EDAD 57', text_cleaned, flags=re.IGNORECASE)
     text_cleaned = re.sub(r'EDAD[\s:]*s7', 'EDAD 57', text_cleaned, flags=re.IGNORECASE)
-    
-    # Reemplazar "S7" por "57" cuando aparece solo en una línea (común en tablas)
     text_cleaned = re.sub(r'\bS7\b', '57', text_cleaned)
     text_cleaned = re.sub(r'\bs7\b', '57', text_cleaned)
-    
-    # Reemplazar "S" seguida de un dígito por "5" + ese dígito
     text_cleaned = re.sub(r'EDAD[\s:]*S(\d)', r'EDAD 5\1', text_cleaned, flags=re.IGNORECASE)
     
-    # Patrones de búsqueda más flexibles
+    # Patrones de búsqueda
     patterns = [
         # Empresa
         ('empresa_contratante', r"EMPRESA[:\s]+([^\n]+)"),
@@ -39,23 +81,27 @@ def parse_ocr_text(text: str):
         # Colaborador
         ('nombre_completo', r"COLABORADOR[:\s]+([^\n]+)"),
         
-        # DPI/CUI - Mejorado para capturar cualquier secuencia de dígitos (13 o más)
-        ('cui', r"DPI\s*[/J]?\s*(?:PASAPORTE)?[:\s]*(\d+)"),
+        # DPI/CUI - captura todo incluyendo espacios
+        ('cui', r"DPI\s*[/]?\s*PASAPORTE[:\s]*([\d\s]+)"),
+        ('cui', r"DPI[:\s]*([\d\s]+)"),
         
         # Dirección
         ('direccion', r"DIRECCI[OÓ]N[:\s]+([^\n]+)"),
         
-        # Fecha de Inicio
-        ('fecha_inicio', r"FECHA\s+DE\s+INICIO[:\s]+([^\n]+)"),
+        # Fecha de Inicio - captura formato dd/mm/aaaa o mal formateado
+        ('fecha_inicio', r"FECHA\s+DE\s+INICIO[:\s]*(\d{1,2}/\d{1,2}/\d{4})"),
+        ('fecha_inicio', r"FECHA\s+DE\s+INICIO[:\s]*([\d/hHoO]+)"),
         
         # Fecha de Finalización
+        ('fecha_fin', r"FECHA\s+DE\s+FINALIZACI[OÓ]N[:\s]*(\d{1,2}/\d{1,2}/\d{4})"),
+        ('fecha_fin', r"FECHA\s+DE\s+FINALIZACI[OÓ]N[:\s]*([\d/hHoO]+)"),
         ('fecha_fin', r"FECHA\s+DE\s+FINALIZACI[OÓ]N[:\s]+([^\n]+)"),
         
-        # Honorarios - más flexible para capturar diferentes formatos
-        ('monto', r"HONORARIOS\s+POR\s+PA[GC]AR[:\s]+([\d,]+\.?\d{0,2})"),
+        # Honorarios - captura Q al inicio
+        ('monto', r"HONORARIOS\s+POR\s+PA[GC]AR[:\s]*Q?([\d,\.]+)"),
         
         # Posición
-        ('posicion', r"POSICI[OÓ]N[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:QUEDO|ATENTO|SALUDOS|$)"),
+        ('posicion', r"POSICI[OÓ]N[:\s]+([^\n]+)"),
         
         # Profesión
         ('profesion', r"PROFESI[OÓ]N[:\s]+([^\n]+)"),
@@ -63,45 +109,60 @@ def parse_ocr_text(text: str):
         # Estado Civil
         ('estado_civil', r"ESTADO\s+CIVIL[:\s]+([^\n]+)"),
         
-        # --- EDAD (MEJORADO ESPECIALMENTE PARA TABLAS) ---
-        # Patrón 1: Busca "EDAD" seguido de posibles espacios/saltos de línea y 1-3 dígitos
-        ('edad', r"EDAD[:\s]*\s*(\d{1,3})(?:\s|$|\n)"),
-        # Patrón 2: Busca línea que contenga solo "EDAD" y la siguiente con número
-        ('edad', r"EDAD\s*\n\s*(\d{1,3})"),
-        # Patrón 3: Busca "EDAD" en una celda y el número en otra (tabla HTML)
-        ('edad', r"EDAD[^\d]{0,10}(\d{2})"),
-        # Patrón 4: Busca número seguido de "AÑOS"
-        ('edad', r"(\d{1,3})\s*A[ÑN]OS"),
-        # Patrón 5: Busca después de "ESTADO CIVIL" el siguiente número aislado
-        ('edad', r"ESTADO\s+CIVIL[^\d]+?(\d{1,3})(?:\s|$|\n)"),
-        # Patrón 6: Busca cualquier número de 2 dígitos entre EDAD y POSICIÓN (común en tablas)
-        ('edad', r"EDAD.*?(\d{2}).*?POSICI[OÓ]N"),
-        # Patrón 7: NUEVO - Busca EDAD en tabla con barra vertical como separador
-        ('edad', r"EDAD\s*\|\s*(\d{2})"),
-        # Patrón 8: NUEVO - Busca EDAD con múltiples espacios (tabla sin bordes)
-        ('edad', r"EDAD\s{2,}(\d{2})"),
+        # Edad
+        ('edad', r"EDAD[:\s]*(\d{1,3})\s*a[ñn]os"),
+        ('edad', r"EDAD[:\s]*(\d{1,3})"),
+        ('edad', r"(\d{1,3})\s*a[ñn]os"),
     ]
     
-    # Extraer datos usando los patrones (usar texto limpiado)
+    # Extraer datos usando los patrones
     for key, pattern in patterns:
-        if key not in data:  # Solo si no se ha encontrado antes
+        if key not in data:
             match = re.search(pattern, text_cleaned, re.IGNORECASE | re.DOTALL | re.MULTILINE)
             if match:
                 try:
                     value = match.group(1).strip()
                     if value:
-                        # Limpiar comas del monto
-                        if key == 'monto':
-                            value = value.replace(',', '')
-                        # Validar edad (debe estar entre 18 y 99)
-                        if key == 'edad':
-                            edad_num = int(value)
-                            if edad_num < 18 or edad_num > 99:
-                                continue  # Ignorar este match y seguir buscando
                         data[key] = value
                         print(f"✓ {key}: {value}")
                 except (ValueError, IndexError) as e:
-                    print(f"⚠ Error procesando {key}: {e}")
+                    print(f" Error procesando {key}: {e}")
+    
+    # ===== LIMPIEZA DE DATOS POST-EXTRACCIÓN =====
+    
+    # Limpiar CUI (quitar espacios)
+    if data.get('cui'):
+        data['cui'] = data['cui'].replace(' ', '').strip()
+        print(f"✓ cui (limpiado): {data['cui']}")
+    
+    # Limpiar fechas con formato guatemalteco
+    if data.get('fecha_inicio'):
+        data['fecha_inicio'] = limpiar_fecha_gt(data['fecha_inicio'])
+        print(f"✓ fecha_inicio (limpiada): {data['fecha_inicio']}")
+    
+    if data.get('fecha_fin'):
+        fecha_fin = data['fecha_fin']
+        # Verificar si es texto como "indefinido" o fecha
+        if not any(palabra in fecha_fin.lower() for palabra in ['indefinido', 'tiempo']):
+            data['fecha_fin'] = limpiar_fecha_gt(fecha_fin)
+        print(f"✓ fecha_fin (limpiada): {data['fecha_fin']}")
+    
+    # Limpiar nombre (correcciones OCR comunes)
+    if data.get('nombre_completo'):
+        nombre = data['nombre_completo']
+        nombre = re.sub(r'^L/', 'J', nombre)
+        nombre = re.sub(r'\bL/', 'J', nombre)
+        nombre = nombre.replace('0s', 'OS')
+        nombre = nombre.replace('CRLOS', 'CARLOS')
+        nombre = re.sub(r'\b0\b', 'O', nombre)
+        data['nombre_completo'] = nombre.strip()
+        print(f"✓ nombre_completo (limpiado): {data['nombre_completo']}")
+    
+    # Limpiar monto
+    if data.get('monto'):
+        monto = data['monto'].replace(',', '')
+        data['monto'] = monto
+        print(f"✓ monto (limpiado): {monto}")
     
     # Limpiar el campo posición
     if data.get('posicion'):
@@ -112,6 +173,15 @@ def parse_ocr_text(text: str):
                 break
         data['posicion'] = posicion
         print(f"✓ posicion (limpiada): {posicion}")
+    
+    # Validar edad
+    if data.get('edad'):
+        try:
+            edad_num = int(data['edad'])
+            if edad_num < 18 or edad_num > 99:
+                data['edad'] = ""
+        except:
+            data['edad'] = ""
     
     # Procesar el monto
     monto_numero = 0.0
@@ -130,7 +200,7 @@ def parse_ocr_text(text: str):
     
     # Procesar fecha de fin
     fecha_fin_texto = data.get("fecha_fin")
-    if not fecha_fin_texto or "indefinido" in fecha_fin_texto.lower():
+    if not fecha_fin_texto or "indefinido" in str(fecha_fin_texto).lower():
         fecha_fin_texto = "Contrato Indefinido"
     
     # Construir la respuesta estructurada
@@ -143,7 +213,8 @@ def parse_ocr_text(text: str):
             "edad": data.get("edad", ""),
             "estado_civil": data.get("estado_civil", ""),
             "profesion": data.get("profesion", ""),
-            "posicion": data.get("posicion", "")
+            "posicion": data.get("posicion", ""),
+            "nacionalidad": None
         },
         "datos_contrato": {
             "tipo_contrato": data.get("posicion", "Servicios Profesionales"),
@@ -156,7 +227,7 @@ def parse_ocr_text(text: str):
     }
     
     print("\n" + "="*70)
-    print("📋 RESULTADO PROCESADO:")
+    print(" RESULTADO PROCESADO:")
     print("="*70)
     import json
     print(json.dumps(structured_data, indent=2, ensure_ascii=False))

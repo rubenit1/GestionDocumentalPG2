@@ -28,27 +28,24 @@ def login(body: dict = Body(...), db: Session = Depends(get_db)):
     """
     Body esperado:
     {
-        "login": "admin@empresa.com" o "admin",
-        "password": "Temporal123!"
+        "login": "usuario@empresa.com" o "admin",
+        "password": "password!"
     }
     """
     login_val = body.get("login")
     password = body.get("password")
 
     if not login_val or not password:
-        raise HTTPException(status_code=400, detail="Faltan credenciales")
+        raise HTTPException(status_code=400, detail="Rellene Todos los Campos Requeridos")
 
     token, user_public = auth_service.login(db, login_val, password)
 
     return LoginResponse(ok=True, token=token, user=user_public)
-
-# ========= DEPENDENCIAS REUSABLES =========
+# ========= DEPENDENCIA: OBTENER USUARIO ACTUAL =========
 def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenData:
-    """Úsalo en cualquier endpoint que quieras proteger con login."""
     return auth_service.decode_token(token)
 
 def require_roles(roles_permitidos: list[str]):
-    """Restringe endpoints por rol ("admin", "legal", etc.)."""
     def checker(user: TokenData = Depends(get_current_user)):
         if user.rol not in roles_permitidos:
             raise HTTPException(status_code=403, detail="Sin permiso")
